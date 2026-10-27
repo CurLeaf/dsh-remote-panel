@@ -2,7 +2,7 @@
 # dsh-remote-panel 部署脚本（由插件渲染，版本 @@VERSION@@）
 #
 # 幂等：重复执行不会重复写入，也不会覆盖已有的 Caddy 站点配置。
-# 卸载：dsh-remote-panel.sh --uninstall
+# 卸载：本脚本 --uninstall
 #
 # 只做两件事：装一个用户级 Caddy（数据面），装一个 system 级 EasyTier（网络面）。
 set -euo pipefail
@@ -15,6 +15,19 @@ VIRTUAL_IP='@@VIRTUAL_IP@@'
 RELAY_HOST='@@RELAY_HOST@@'
 ET_VERSION='@@ET_VERSION@@'
 PANEL_VERSION='@@VERSION@@'
+ACCESS_KEY='@@ACCESS_KEY@@'
+
+# 路径可覆盖：便于在临时目录里做端到端演练，生产环境用默认值
+ETC_DIR="${ETC_DIR:-/etc}"
+UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
+BIN_DIR="${BIN_DIR:-/usr/local/bin}"
+
+ET_UNIT='easytier-dsh-remote'
+USER_UNIT='dsh-proxy'
+ENV_FILE="$ETC_DIR/easytier/dsh-remote.env"
+UNIT_FILE="$UNIT_DIR/$ET_UNIT.service"
+CADDY_DIR="$TARGET_HOME/.config/caddy"
+USER_UNIT_DIR="$TARGET_HOME/.config/systemd/user"
 
 log() { printf '\033[1;34m[deploy]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[deploy]\033[0m %s\n' "$*" >&2; exit 1; }
@@ -23,14 +36,14 @@ die() { printf '\033[1;31m[deploy]\033[0m %s\n' "$*" >&2; exit 1; }
 
 if [ "${1:-}" = "--uninstall" ]; then
 	log "停止并移除服务"
-	systemctl disable --now easytier-dsh-remote 2>/dev/null || true
-	rm -f /etc/systemd/system/easytier-dsh-remote.service
+	systemctl disable --now "$ET_UNIT" 2>/dev/null || true
+	rm -f "$UNIT_FILE"
 	systemctl daemon-reload
-	rm -f /etc/easytier/dsh-remote.env
+	rm -f "$ENV_FILE"
 	runuser -u "$TARGET_USER" -- env XDG_RUNTIME_DIR="/run/user/$(id -u "$TARGET_USER")" \
-		systemctl --user disable --now dsh-proxy 2>/dev/null || true
-	rm -f "$TARGET_HOME/.config/systemd/user/dsh-proxy.service"
-	rm -rf "$TARGET_HOME/.config/caddy"
+		systemctl --user disable --now "$USER_UNIT" 2>/dev/null || true
+	rm -f "$USER_UNIT_DIR/$USER_UNIT.service"
+	rm -rf "$CADDY_DIR"
 	log "已移除。二进制未删除（可能被其他用途复用）。"
 	exit 0
 fi
@@ -47,19 +60,19 @@ command -v curl >/dev/null || die "缺少 curl：apt install curl"
 if command -v easytier-core >/dev/null; then
 	log "easytier-core 已存在：$(easytier-core --version 2>/dev/null | head -1)"
 else
-	[ "$(command -v easytier-core >/dev/null; echo $?)" = "0" ] || true
 	log "下载 EasyTier ${ET_VERSION} (${ET_ARCH})"
 	tmp="$(mktemp -d)"
 	trap 'rm -rf "$tmp"' EXIT
 	url="https://github.com/EasyTier/EasyTier/releases/download/v${ET_VERSION}/easytier-linux-${ET_ARCH}-v${ET_VERSION}.zip"
 	curl -fsSL "$url" -o "$tmp/et.zip" || die "下载失败：$url（请检查网络或代理）"
-	( cd "$tmp" && unzip -q et.zip )
+	( cd "$tmp" && unzip -q et.zip ) || die "解压失败：$tmp/et.zip"
 	core="$(find "$tmp" -name easytier-core -type f | head -1)"
 	cli="$(find "$tmp" -name easytier-cli -type f | head -1)"
 	[ -n "$core" ] || die "压缩包内未找到 easytier-core"
-	install -m 755 "$core" /usr/local/bin/easytier-core
-	[ -n "$cli" ] && install -m 755 "$cli" /usr/local/bin/easytier-cli
-	log "安装完成：$(easytier-core --version 2>/dev/null | head -1)"
+	install -d -m 755 "$BIN_DIR"
+	install -m 755 "$core" "$BIN_DIR/easytier-core"
+	[ -n "$cli" ] && install -m 755 "$cli" "$BIN_DIR/easytier-cli"
+	log "安装完成：$("$BIN_DIR/easytier-core" --version 2>/dev/null | head -1)"
 fi
 
 # tcp-whitelist 在旧版本不存在，探测后再决定是否加
@@ -68,20 +81,20 @@ if easytier-core --help 2>&1 | grep -q 'tcp-whitelist'; then
 	TCP_WL="--tcp-whitelist ${PROXY_PORT}"
 fi
 
-install -d -m 755 /etc/easytier
+install -d -m 755 "$ETC_DIR/easytier" "$UNIT_DIR"
 umask 077
-cat > /etc/easytier/dsh-remote.env <<'DSH_ENV_EOF'
+cat > "$ENV_FILE" <<'DSH_ENV_EOF'
 @@ENV_BODY@@
 DSH_ENV_EOF
-chmod 600 /etc/easytier/dsh-remote.env
+chmod 600 "$ENV_FILE"
 
-cat > /etc/systemd/system/easytier-dsh-remote.service <<'DSH_UNIT_EOF'
+cat > "$UNIT_FILE" <<'DSH_UNIT_EOF'
 @@UNIT_BODY@@
 DSH_UNIT_EOF
-sed -i "s#@@TCP_WHITELIST@@#${TCP_WL}#" /etc/systemd/system/easytier-dsh-remote.service
-chmod 644 /etc/systemd/system/easytier-dsh-remote.service
+sed -i "s#@@TCP_WHITELIST@@#${TCP_WL}#" "$UNIT_FILE"
+chmod 644 "$UNIT_FILE"
 systemctl daemon-reload
-systemctl enable --now easytier-dsh-remote
+systemctl enable --now "$ET_UNIT"
 log "EasyTier 已启动"
 
 # ---------------------------------------------------------------- Caddy
@@ -100,25 +113,25 @@ if ! command -v caddy >/dev/null; then
 	fi
 fi
 
-install -d -m 700 -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" "$TARGET_HOME/.config/caddy"
-install -d -m 700 -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" "$TARGET_HOME/.config/systemd/user"
+install -d -m 700 -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" "$CADDY_DIR"
+install -d -m 700 -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" "$USER_UNIT_DIR"
 
-cat > "$TARGET_HOME/.config/caddy/Caddyfile" <<'DSH_CADDY_EOF'
+cat > "$CADDY_DIR/Caddyfile" <<'DSH_CADDY_EOF'
 @@CADDY_BODY@@
 DSH_CADDY_EOF
-cat > "$TARGET_HOME/.config/systemd/user/dsh-proxy.service" <<'DSH_PROXY_EOF'
+cat > "$USER_UNIT_DIR/$USER_UNIT.service" <<'DSH_PROXY_EOF'
 @@PROXY_UNIT_BODY@@
 DSH_PROXY_EOF
 chown "$TARGET_USER":"$(id -gn "$TARGET_USER")" \
-	"$TARGET_HOME/.config/caddy/Caddyfile" \
-	"$TARGET_HOME/.config/systemd/user/dsh-proxy.service"
-chmod 644 "$TARGET_HOME/.config/caddy/Caddyfile" "$TARGET_HOME/.config/systemd/user/dsh-proxy.service"
+	"$CADDY_DIR/Caddyfile" \
+	"$USER_UNIT_DIR/$USER_UNIT.service"
+chmod 644 "$CADDY_DIR/Caddyfile" "$USER_UNIT_DIR/$USER_UNIT.service"
 
 loginctl enable-linger "$TARGET_USER" >/dev/null 2>&1 || true
 runuser -u "$TARGET_USER" -- env XDG_RUNTIME_DIR="/run/user/$(id -u "$TARGET_USER")" \
 	systemctl --user daemon-reload
 runuser -u "$TARGET_USER" -- env XDG_RUNTIME_DIR="/run/user/$(id -u "$TARGET_USER")" \
-	systemctl --user enable --now dsh-proxy
+	systemctl --user enable --now "$USER_UNIT"
 log "反代已启动（用户级服务，无 root 权限）"
 
 # ---------------------------------------------------------------- 验收
@@ -128,7 +141,7 @@ for _ in $(seq 1 60); do
 	sleep 1
 done
 ip -4 -o addr show 2>/dev/null | grep -q " ${VIRTUAL_IP}/" \
-	|| die "虚拟 IP 未就绪：检查 /etc/easytier/dsh-remote.env 与中继 ${RELAY_HOST}"
+	|| die "虚拟 IP 未就绪：检查 $ENV_FILE 与中继 ${RELAY_HOST}"
 
 for _ in $(seq 1 30); do
 	ss -ltn 2>/dev/null | grep -q ":${PROXY_PORT} " && break
@@ -140,7 +153,7 @@ health="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PROXY_PORT}
 [ "$health" = "200" ] || die "healthz 未返回 200（实际 ${health}）"
 
 PAYLOAD="$(printf '{"version":"%s","port":%s,"ip":"%s","upstream":%s,"health":"%s","key":"%s"}' \
-	"$PANEL_VERSION" "$PROXY_PORT" "$VIRTUAL_IP" "$UPSTREAM_PORT" "$health" "@@ACCESS_KEY@@" | base64 -w0)"
+	"$PANEL_VERSION" "$PROXY_PORT" "$VIRTUAL_IP" "$UPSTREAM_PORT" "$health" "$ACCESS_KEY" | base64 -w0)"
 
 cat <<EOF
 

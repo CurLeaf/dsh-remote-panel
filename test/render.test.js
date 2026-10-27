@@ -72,7 +72,8 @@ test('env 文件不含 unit 级密钥泄漏路径', () => {
 	const env = files['/etc/easytier/dsh-remote.env']
 	assert.match(env, /ET_SECRET='abcdefghijklmnop1234'/)
 	const install = renderDeploy(base).install
-	assert.match(install, /chmod 600 \/etc\/easytier\/dsh-remote\.env/)
+	assert.match(install, /ENV_FILE="\$ETC_DIR\/easytier\/dsh-remote\.env"/)
+	assert.match(install, /chmod 600 "\$ENV_FILE"/)
 })
 
 test('unit 只引用环境变量，不内联密钥', () => {
