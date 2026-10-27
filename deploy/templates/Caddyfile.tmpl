@@ -1,7 +1,7 @@
 # dsh-remote-panel: 反代与门禁（用户级 Caddy，独立配置，不碰系统 Caddy）
 # 生成者：dsh-remote-panel @@VERSION@@
 {
-	admin off
+	# admin API 保持默认（仅本机 2019）：白名单热重载依赖 `caddy reload`
 	auto_https off
 }
 
@@ -24,11 +24,15 @@
 		# 第二层：口令门禁
 		@key query k=@@ACCESS_KEY@@
 		handle @key {
-			header Set-Cookie "dsh_gate=v1; Max-Age=31536000; Path=/; HttpOnly; SameSite=Lax"
-			redir / 303
+			# Cookie 值就是口令本身（24 位随机），而不是常量：常量能被手工伪造
+			header Set-Cookie "dsh_gate=@@ACCESS_KEY@@; Max-Age=31536000; Path=/; HttpOnly; SameSite=Lax"
+			# 显式写 * 匹配器：否则开头的 / 会被当成路径匹配器，
+			# 变成 Location: 303 的怪响应
+			redir * / 303
 		}
 
-		@paired cookie dsh_gate v1
+		# Caddy 默认没有 cookie 匹配器，用 Header 通配匹配替代
+		@paired header Cookie "*dsh_gate=@@ACCESS_KEY@@*"
 		handle @paired {
 			# 关键：不重写 Host/Origin。DSH 通过 --trusted-host 接受这个 authority，
 			# Cookie 因此天然同源，不需要任何注入或伪造。
