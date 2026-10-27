@@ -120,6 +120,12 @@ npm test          # node --test，68 条
 
 提交约定：一个功能点一个 commit，清单见 [docs/checklist.md](docs/checklist.md)。
 
+浏览器里才能确认的部分（移动端外壳、三层门禁）见 [docs/verify.md](docs/verify.md)。
+
+```bash
+CADDY_BIN=/path/to/caddy npm test   # 额外跑真实 Caddy 的门禁语义测试
+```
+
 ## 许可
 
 Apache-2.0
