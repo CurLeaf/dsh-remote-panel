@@ -16,6 +16,8 @@ RELAY_HOST='@@RELAY_HOST@@'
 ET_VERSION='@@ET_VERSION@@'
 PANEL_VERSION='@@VERSION@@'
 ACCESS_KEY='@@ACCESS_KEY@@'
+ET_SHA_X86_64='@@ET_SHA_X86_64@@'
+ET_SHA_AARCH64='@@ET_SHA_AARCH64@@'
 
 # 路径可覆盖：便于在临时目录里做端到端演练，生产环境用默认值
 ETC_DIR="${ETC_DIR:-/etc}"
@@ -49,8 +51,8 @@ if [ "${1:-}" = "--uninstall" ]; then
 fi
 
 case "$(uname -m)" in
-	x86_64) ET_ARCH=x86_64 ;;
-	aarch64|arm64) ET_ARCH=aarch64 ;;
+	x86_64) ET_ARCH=x86_64; ET_SHA="$ET_SHA_X86_64" ;;
+	aarch64|arm64) ET_ARCH=aarch64; ET_SHA="$ET_SHA_AARCH64" ;;
 	*) die "不支持的架构：$(uname -m)（v1 仅提供 x86_64 / aarch64）" ;;
 esac
 command -v systemctl >/dev/null || die "未找到 systemd"
@@ -65,6 +67,13 @@ else
 	trap 'rm -rf "$tmp"' EXIT
 	url="https://github.com/EasyTier/EasyTier/releases/download/v${ET_VERSION}/easytier-linux-${ET_ARCH}-v${ET_VERSION}.zip"
 	curl -fsSL "$url" -o "$tmp/et.zip" || die "下载失败：$url（请检查网络或代理）"
+	if [ -n "$ET_SHA" ]; then
+		echo "$ET_SHA  $tmp/et.zip" | sha256sum -c - >/dev/null 2>&1 \
+			|| die "sha256 校验失败：$url（下载被篡改或版本不匹配）"
+		log "sha256 校验通过"
+	else
+		log "警告：这个版本没有收录 sha256，跳过校验"
+	fi
 	( cd "$tmp" && unzip -q et.zip ) || die "解压失败：$tmp/et.zip"
 	core="$(find "$tmp" -name easytier-core -type f | head -1)"
 	cli="$(find "$tmp" -name easytier-cli -type f | head -1)"

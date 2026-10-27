@@ -90,3 +90,16 @@ test('summary 给出可直接点的两条 URL', () => {
 	assert.equal(summary.urls.mesh, 'http://10.140.140.223:8710/')
 	assert.match(summary.gate, /\?k=MwcufbMjggfe3b8wYm8Rxykm$/)
 })
+
+test('脚本钉住 EasyTier 发布包的 sha256', () => {
+	const { install } = renderDeploy(base)
+	assert.match(install, /ET_SHA_X86_64='61b659ea/)
+	assert.match(install, /ET_SHA_AARCH64='f533ec25/)
+	assert.match(install, /sha256sum -c -/)
+})
+
+test('未收录的版本只跳过校验，不阻断部署', () => {
+	const { install } = renderDeploy({ ...base, etVersion: '9.9.9' })
+	assert.match(install, /ET_SHA_X86_64=''/)
+	assert.match(install, /跳过校验/)
+})

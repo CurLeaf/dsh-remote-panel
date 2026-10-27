@@ -57,6 +57,28 @@ chrome --headless=new --remote-debugging-port=9333 --remote-allow-origins='*' --
 
 结论：H5「桌面零影响」成立。
 
+## 2026-10-27 · 门禁四条分支（真实 Caddy v2.11.7）
+
+| 请求 | 结果 |
+|---|---|
+| `GET /healthz`（白名单内） | `200 ok` |
+| `GET /`（无 Cookie） | `401 dsh-remote: access key required` |
+| `GET /?k=wrong…` | `401` |
+| `GET /?k=<正确口令>` | `303` + `Location: /` + `Set-Cookie: dsh_gate=<口令>` |
+| 带 `dsh_gate=<口令>` 的 `GET /` | 透传到 DSH，返回 `401 dsh web authentication required` |
+| 源地址改为 `127.0.0.2` | `403 dsh-remote: source not allowed` |
+
+复现：`CADDY_BIN=/path/to/caddy npm test`（`test/caddy.gate.test.js`）。
+
+## 2026-10-27 · EasyTier 发布包
+
+| 架构 | 文件 | sha256 | HTTP |
+|---|---|---|---|
+| x86_64 | `easytier-linux-x86_64-v2.6.4.zip`（25M） | `61b659ea…09dfd6` | 200 |
+| aarch64 | `easytier-linux-aarch64-v2.6.4.zip`（20M） | `f533ec25…c1a70f` | 200 |
+
+两个哈希已写进 `lib/deploy/assets.js`，脚本下载后 `sha256sum -c` 校验；未收录的版本只告警不阻断。
+
 ## 尚未覆盖
 
 - **H1 真实挂载**：上面是手工注入 CSS + 构造 `dsh-mobile-bar` 节点，不是插件真装载。

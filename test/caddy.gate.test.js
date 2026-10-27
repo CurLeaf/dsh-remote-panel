@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:http'
+import { createServer, request as httpRequest } from 'node:http'
 import { createServer as createTcpServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -42,6 +42,21 @@ async function waitFor(url, attempts = 40) {
 }
 
 const KEY = 'MwcufbMjggfe3b8wYm8Rxykm'
+
+/** 用指定源地址发一次请求：用来验证 remote_ip 白名单。 */
+function requestFrom(port, localAddress, path = '/') {
+	return new Promise((resolve, reject) => {
+		const req = httpRequest({ host: '127.0.0.1', port, path, localAddress, timeout: 3000 }, (res) => {
+			let body = ''
+			res.setEncoding('utf8')
+			res.on('data', (chunk) => { body += chunk })
+			res.on('end', () => resolve({ status: res.statusCode, body }))
+		})
+		req.on('timeout', () => req.destroy(new Error('timeout')))
+		req.on('error', reject)
+		req.end()
+	})
+}
 
 test('真实 Caddy 下的门禁语义', { skip: CADDY === undefined && '未设置 CADDY_BIN' }, async (t) => {
 	const proxyPort = await freePort()
@@ -101,4 +116,9 @@ test('真实 Caddy 下的门禁语义', { skip: CADDY === undefined && '未设�
 	const paired = await fetch(`${base}/`, { headers: { cookie: `dsh_gate=${KEY}` } })
 	assert.equal(paired.status, 401)
 	assert.match(await paired.text(), /dsh web authentication required/)
+
+	// 换一个不在白名单的源地址（127.0.0.2 不匹配 127.0.0.1），应被 403 挡下
+	const foreign = await requestFrom(proxyPort, '127.0.0.2')
+	assert.equal(foreign.status, 403)
+	assert.match(foreign.body, /source not allowed/)
 })
