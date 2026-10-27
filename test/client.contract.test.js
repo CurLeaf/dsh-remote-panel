@@ -43,13 +43,12 @@ test('factory 返回 { inject, apply }', () => {
 	assert.equal(typeof exports.apply, 'function')
 })
 
-test('apply 注册 settings.section 分区', () => {
+test('apply 注册设置分区与移动端外壳插槽', () => {
 	const exports = loadBundle().factory(fakeRequire)
 	const registrations = []
 	const ctx = {
 		slots: {
 			inject(name, setup) {
-				assert.equal(name, 'settings.section')
 				return setup()
 			},
 			register(registration, component) {
@@ -60,10 +59,18 @@ test('apply 注册 settings.section 分区', () => {
 	}
 	exports.apply(ctx)
 
-	assert.equal(registrations.length, 1)
-	const [{ registration, component }] = registrations
-	assert.equal(registration.name, 'settings.section')
-	assert.equal(registration.id, 'remote-panel')
-	assert.equal(registration.label(), '远程访问')
-	assert.equal(typeof component, 'function')
+	const byName = new Map(registrations.map((entry) => [entry.registration.name, entry]))
+	assert.deepEqual([...byName.keys()].sort(), [
+		'conversation.header.leading',
+		'settings.section',
+		'shell.overlay',
+	])
+
+	const section = byName.get('settings.section')
+	assert.equal(section.registration.id, 'remote-panel')
+	assert.equal(section.registration.label(), '远程访问')
+	assert.equal(typeof section.component, 'function')
+
+	assert.equal(byName.get('shell.overlay').registration.id, 'remote-panel.mobile-bar')
+	assert.equal(byName.get('conversation.header.leading').registration.id, 'remote-panel.hamburger')
 })
