@@ -115,7 +115,7 @@ Windows / macOS 服务管理 · 从零搭建 EasyTier 共享节点 · 多机集�
 ## 开发
 
 ```bash
-npm test          # node --test，68 条
+npm test          # node --test，81 条（80 通过 + 1 条未设置 CADDY_BIN 时跳过）
 ```
 
 提交约定：一个功能点一个 commit，清单见 [docs/checklist.md](docs/checklist.md)。
