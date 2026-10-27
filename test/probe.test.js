@@ -13,7 +13,7 @@ const failed = async () => {
 }
 
 test('两个单元都 active 且 healthz 正常时 ok', async () => {
-	const result = await probe({ port: 8710 }, { exec: active, health: async () => ({ ok: true, status: 200 }) })
+	const result = await probe({ port: 8710 }, { exec: active, health: async () => ({ ok: true, status: 200 }), upstream: async () => ({ ok: true, status: 401 }) })
 	assert.equal(result.ok, true)
 	assert.equal(result.easytier.state, 'active')
 	assert.equal(result.caddy.ok, true)
@@ -24,13 +24,13 @@ test('任一单元失败则 ok 为 false', async () => {
 		if (args.includes(UNITS.caddy)) throw new Error('inactive')
 		return { stdout: 'active\nrunning', stderr: '' }
 	}
-	const result = await probe({ port: 8710 }, { exec, health: async () => ({ ok: true, status: 200 }) })
+	const result = await probe({ port: 8710 }, { exec, health: async () => ({ ok: true, status: 200 }), upstream: async () => ({ ok: true, status: 401 }) })
 	assert.equal(result.ok, false)
 	assert.equal(result.caddy.ok, false)
 })
 
 test('healthz 失败则整体不 ok', async () => {
-	const result = await probe({ port: 8710 }, { exec: active, health: async () => ({ ok: false, status: 401 }) })
+	const result = await probe({ port: 8710 }, { exec: active, health: async () => ({ ok: false, status: 401 }), upstream: async () => ({ ok: true }) })
 	assert.equal(result.ok, false)
 	assert.equal(result.healthz.status, 401)
 })
@@ -43,6 +43,7 @@ test('未部署时不探测 healthz', async () => {
 			called = true
 			return { ok: true }
 		},
+		upstream: async () => ({ ok: true }),
 	})
 	assert.equal(called, false)
 	assert.equal(result.healthz.ok, false)
@@ -55,9 +56,18 @@ test('caddy 探测带 --user，easytier 不带', async () => {
 		seen.push(args)
 		return { stdout: 'active\nrunning', stderr: '' }
 	}
-	await probe({ port: 8710 }, { exec, health: async () => ({ ok: true }) })
+	await probe({ port: 8710 }, { exec, health: async () => ({ ok: true }), upstream: async () => ({ ok: true }) })
 	const caddyCall = seen.find((args) => args.includes(UNITS.caddy))
 	const etCall = seen.find((args) => args.includes(UNITS.easytier))
 	assert.ok(caddyCall.includes('--user'))
 	assert.ok(!etCall.includes('--user'))
+})
+
+test('上游不是 DSH 时 ok 为 false', async () => {
+	const result = await probe(
+		{ port: 8710 },
+		{ exec: active, health: async () => ({ ok: true }), upstream: async () => ({ ok: false, status: 200 }) },
+	)
+	assert.equal(result.ok, false)
+	assert.equal(result.upstream.status, 200)
 })
