@@ -1,0 +1,8 @@
+# dsh-remote-panel bundle patch.
+#
+# 由 `dsh plugin --profile <name> add dsh-remote-panel` 挂载，无需手改 profile。
+# insert[].id 同时是本插件的「设置命名空间 id」，必须与 lib/index.js 的
+# `export const name` 保持一致，否则设置页找不到对应分区。
+- insert:
+    - id: remote-panel
+      name: dsh-remote-panel

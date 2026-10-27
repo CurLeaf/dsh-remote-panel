@@ -1,0 +1,62 @@
+{
+  "name": "dsh-remote-panel",
+  "version": "0.1.0",
+  "description": "DSH 远程访问控制面：部署向导、状态面板与一键配对（EasyTier + Caddy），数据面保持进程外。",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "deploy",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.9.0",
+    "dsh": ">=0.2.1-rc.3"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CurLeaf/dsh-remote-panel.git"
+  },
+  "homepage": "https://github.com/CurLeaf/dsh-remote-panel#readme",
+  "bugs": {
+    "url": "https://github.com/CurLeaf/dsh-remote-panel/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "remote",
+    "easytier",
+    "caddy",
+    "mobile"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
