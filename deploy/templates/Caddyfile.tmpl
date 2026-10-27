@@ -6,6 +6,13 @@
 }
 
 :@@PORT@@ {
+	# 访问日志进 journal，供面板「最近拒绝」使用
+	log {
+		output stderr
+		format json
+		level INFO
+	}
+
 	# 第一层：来源白名单
 	@lan remote_ip 127.0.0.1 ::1 @@LAN_CIDR@@ @@VIRTUAL_IP@@
 	handle @lan {
