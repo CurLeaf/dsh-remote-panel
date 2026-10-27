@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
+import { createServer } from 'node:net'
+
+import { findFreePort } from '../lib/api.js'
 import { API_PREFIX, TOKEN_HEADER, handleRequest } from '../lib/index.js'
 
 const token = 'test-token'
@@ -89,4 +92,17 @@ test('POST /render 坏 JSON 为 400', async () => {
 	const { status, body } = await call({ method: 'POST', url: `${API_PREFIX}/render`, body: '{oops' })
 	assert.equal(status, 400)
 	assert.match(body.error, /JSON/)
+})
+
+test('findFreePort 跳过被占用的端口', async () => {
+	const server = createServer()
+	await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+	const busy = server.address().port
+	try {
+		const free = await findFreePort(busy)
+		assert.notEqual(free, busy)
+		assert.ok(free > busy)
+	} finally {
+		await new Promise((resolve) => server.close(resolve))
+	}
 })
