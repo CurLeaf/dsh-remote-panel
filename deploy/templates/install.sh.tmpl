@@ -139,8 +139,8 @@ ss -ltn 2>/dev/null | grep -q ":${PROXY_PORT} " || die "反代未监听 :${PROXY
 health="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PROXY_PORT}/healthz" || true)"
 [ "$health" = "200" ] || die "healthz 未返回 200（实际 ${health}）"
 
-PAYLOAD="$(printf '{"version":"%s","port":%s,"ip":"%s","upstream":%s,"health":"%s"}' \
-	"$PANEL_VERSION" "$PROXY_PORT" "$VIRTUAL_IP" "$UPSTREAM_PORT" "$health" | base64 -w0)"
+PAYLOAD="$(printf '{"version":"%s","port":%s,"ip":"%s","upstream":%s,"health":"%s","key":"%s"}' \
+	"$PANEL_VERSION" "$PROXY_PORT" "$VIRTUAL_IP" "$UPSTREAM_PORT" "$health" "@@ACCESS_KEY@@" | base64 -w0)"
 
 cat <<EOF
 

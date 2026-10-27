@@ -106,3 +106,9 @@ test('findFreePort 跳过被占用的端口', async () => {
 		await new Promise((resolve) => server.close(resolve))
 	}
 })
+
+test('GET /pair 未部署时为 400', async () => {
+	const { status, body } = await call({ url: `${API_PREFIX}/pair` })
+	assert.equal(status, 400)
+	assert.match(body.error, /尚未部署/)
+})
