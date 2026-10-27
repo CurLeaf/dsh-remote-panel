@@ -1,0 +1,15 @@
+# dsh-remote-panel: 反代（用户级 systemd 服务，无 root）
+# 生成者：dsh-remote-panel @@VERSION@@
+[Unit]
+Description=DSH remote proxy (Caddy, user)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/caddy run --config %h/.config/caddy/Caddyfile --adapter caddyfile
+ExecReload=/usr/bin/caddy reload --config %h/.config/caddy/Caddyfile --adapter caddyfile
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

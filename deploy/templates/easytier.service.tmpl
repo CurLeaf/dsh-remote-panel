@@ -1,0 +1,23 @@
+@ Unit: EasyTier 节点（system 级，唯一需要 root 的部件）
+@ 生成者：dsh-remote-panel @@VERSION@@
+[Unit]
+Description=EasyTier node for dsh-remote-panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/easytier/dsh-remote.env
+ExecStart=/usr/local/bin/easytier-core \
+	--network-name "${ET_NETWORK}" \
+	--network-secret "${ET_SECRET}" \
+	--ipv4 "${ET_IPV4}" \
+	--hostname "${ET_HOSTNAME}" \
+	@@PEERS_FLAGS@@ \
+	@@TCP_WHITELIST@@
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

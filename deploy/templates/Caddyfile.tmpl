@@ -1,0 +1,39 @@
+# dsh-remote-panel: 反代与门禁（用户级 Caddy，独立配置，不碰系统 Caddy）
+# 生成者：dsh-remote-panel @@VERSION@@
+{
+	admin off
+	auto_https off
+}
+
+:@@PORT@@ {
+	# 第一层：来源白名单
+	@lan remote_ip 127.0.0.1 ::1 @@LAN_CIDR@@ @@VIRTUAL_IP@@
+	handle @lan {
+		# 诊断用：不经过任何认证
+		handle /healthz {
+			respond "ok" 200
+		}
+
+		# 第二层：口令门禁
+		@key query k=@@ACCESS_KEY@@
+		handle @key {
+			header Set-Cookie "dsh_gate=v1; Max-Age=31536000; Path=/; HttpOnly; SameSite=Lax"
+			redir / 303
+		}
+
+		@paired cookie dsh_gate v1
+		handle @paired {
+			# 关键：不重写 Host/Origin。DSH 通过 --trusted-host 接受这个 authority，
+			# Cookie 因此天然同源，不需要任何注入或伪造。
+			reverse_proxy 127.0.0.1:@@UPSTREAM_PORT@@
+		}
+
+		handle {
+			respond "dsh-remote: access key required" 401
+		}
+	}
+
+	handle {
+		respond "dsh-remote: source not allowed" 403
+	}
+}
