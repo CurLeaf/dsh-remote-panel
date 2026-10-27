@@ -79,10 +79,30 @@ chrome --headless=new --remote-debugging-port=9333 --remote-allow-origins='*' --
 
 两个哈希已写进 `lib/deploy/assets.js`，脚本下载后 `sha256sum -c` 校验；未收录的版本只告警不阻断。
 
+## 2026-10-27 · 真实页面里的 apply()
+
+方法：拦截 `window.__ModuleLoader__.load` 捕获本插件的 factory，传入手写的 react 桩，
+在真实页面（已登录、390px）调用 `exports.apply(fakeCtx)`。
+
+| 检查 | 结果 |
+|---|---|
+| 捕获到的 entry.id | `remote-panel` |
+| `exports.inject` | `["slots"]` |
+| 注册的插槽 | `shell.overlay` / `conversation.header.leading` / `settings.section` |
+| `apply()` 抛错 | 无 |
+| `<style id="dsh-remote-panel-shell">` | 已注入，942 字节 |
+| 注入后 `_frame` 的 grid | `390px 0px 0px`（立即生效） |
+| 控制台告警 | 无（说明 canary 判定为「已匹配」） |
+
+结论：bundle 在真实页面的加载契约、canary 判定、CSS 注入与三处注册都成立。
+
+> 仍未覆盖：框架真正渲染 `MobileBar` 组件后的 DOM（`.dsh-mobile-bar` 是否存在）。
+> 这一条需要插件被 profile 装载并重启 DSH，属于人工验收步骤。
+
 ## 尚未覆盖
 
-- **H1 真实挂载**：上面是手工注入 CSS + 构造 `dsh-mobile-bar` 节点，不是插件真装载。
-  插件装载后应看到 `bar: 1`、`style: true`。
+- **H1 组件渲染**：apply() 与 CSS 已在真实页面验证，但 `.dsh-mobile-bar` 由框架渲染组件产生，
+  需插件装载后才能看到。
 - 真机触摸/键盘行为（输入框不被顶飞）。
 - `I1` 三层门禁的跨设备实测。
 
