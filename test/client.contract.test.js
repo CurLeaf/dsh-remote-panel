@@ -39,7 +39,7 @@ test('bundle 以包名装载', () => {
 
 test('factory 返回 { inject, apply }', () => {
 	const exports = loadBundle().factory(fakeRequire)
-	assert.deepEqual(Array.from(exports.inject), ['slots'])
+	assert.deepEqual(Array.from(exports.inject), ['slots', 'layout'])
 	assert.equal(typeof exports.apply, 'function')
 })
 
