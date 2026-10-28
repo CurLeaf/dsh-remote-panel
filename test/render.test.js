@@ -141,5 +141,11 @@ test('Caddyfile 支持 k+token 一次扫码', () => {
 test('pairingUrls 生成 combo', async () => {
 	const { pairingUrls } = await import('../lib/pair.js')
 	const urls = pairingUrls({ ip: '10.0.0.1', port: 8710, accessKey: 'k'.repeat(24), token: 't'.repeat(24) })
-	assert.equal(urls.combo, `http://10.0.0.1:8710/?k=${'k'.repeat(24)}&token=${'t'.repeat(24)}`)
+	assert.equal(urls.combo, `http://10.0.0.1:8710/pair?k=${'k'.repeat(24)}&token=${'t'.repeat(24)}`)
+})
+
+test('Caddyfile 提供 /pair 同源跳转入口', () => {
+	const { files } = renderDeploy(base)
+	assert.match(files['~/.config/caddy/Caddyfile'], /handle \/pair/)
+	assert.match(files['~/.config/caddy/Caddyfile'], /location\.replace/)
 })

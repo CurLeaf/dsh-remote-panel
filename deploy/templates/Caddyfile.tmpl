@@ -16,6 +16,14 @@
 	# 第一层：来源白名单
 	@lan remote_ip 127.0.0.1 ::1 @@LAN_CIDR@@ @@VIRTUAL_IP@@
 	handle @lan {
+		# 配对入口：路径匹配（可靠），返回同源页面做一次「同站跳转」。
+		# 跨站导航不会带 SameSite=Strict 的 DSH Cookie，必须由同源页面自己发起。
+		handle /pair {
+			header Set-Cookie "dsh_gate=@@ACCESS_KEY@@; Max-Age=31536000; Path=/; HttpOnly; SameSite=Lax"
+			header Content-Type "text/html; charset=utf-8"
+			respond `<!doctype html><meta charset="utf-8"><title>正在连接…</title><script>const t=new URLSearchParams(location.search).get("token");location.replace(t?"/?token="+encodeURIComponent(t):"/")</script>` 200
+		}
+
 		# 诊断用：不经过任何认证
 		handle /healthz {
 			respond "ok" 200
