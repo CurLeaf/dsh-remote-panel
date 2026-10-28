@@ -77,6 +77,7 @@ dsh plugin --profile web add dsh-remote-panel
 | 手机「一直连接中」 | 系统浏览器会周期性切断 WebSocket | 换 Chrome |
 | 能 ping 通但页面转圈 | 代理软件（如 Karing）抢走了 EasyTier 流量 | 给中继地址加「直连」规则 |
 | 面板报 `no route: GET /doctor` | Host 侧代码在内存里，加路由后没重启 | `systemctl --user restart dsh-web` |
+| 面板报「面板令牌不匹配」 | 页面是重启前打开的（令牌已持久化，理论上不该再出现） | 硬刷新；仍不行就删 `~/.dsh/remote-panel-token` 让两边都换新 |
 
 面板「自检」里的**布局 canary** 用来发现 DSH 升级导致的选择器失配；「复制诊断包」导出的 JSON 已剔除口令与密钥。
 
