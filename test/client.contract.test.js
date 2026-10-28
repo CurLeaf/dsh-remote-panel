@@ -31,9 +31,9 @@ function fakeRequire(id) {
 	throw new Error(`unexpected require: ${id}`)
 }
 
-test('bundle 以 remote-panel 装载', () => {
+test('bundle 以包名装载', () => {
 	const entry = loadBundle()
-	assert.equal(entry.id, 'remote-panel')
+	assert.equal(entry.id, 'dsh-remote-panel')
 	assert.equal(typeof entry.factory, 'function')
 })
 
