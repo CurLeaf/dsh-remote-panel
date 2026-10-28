@@ -96,8 +96,28 @@ chrome --headless=new --remote-debugging-port=9333 --remote-allow-origins='*' --
 
 结论：bundle 在真实页面的加载契约、canary 判定、CSS 注入与三处注册都成立。
 
-> 仍未覆盖：框架真正渲染 `MobileBar` 组件后的 DOM（`.dsh-mobile-bar` 是否存在）。
-> 这一条需要插件被 profile 装载并重启 DSH，属于人工验收步骤。
+## 2026-10-28 · 真实安装后的实机验证
+
+`link:` 装进 web profile 并在设置里可见后，用同一套 CDP 探针实测：
+
+| 检查 | 390px | 1281px |
+|---|---|---|
+| `_frame` 的 grid | `390px 0px 0px` | `280px 1001px 0px` |
+| 正文宽度 | 390 | 1001 |
+| 正文 `padding-bottom` | 56px | 0px |
+| `.dsh-mobile-bar` | `flex` / 57px / 贴底 844 | `none` |
+| `.dsh-mobile-hamburger` | `flex` | `none` |
+| 控制台错误 | 0 | 0 |
+
+控制面 API（带注入令牌）：`/status` → `{ok:true,version:"0.1.0",deployed:false}`，
+`/defaults` → `{user:"yxw",port:8710,lanCidr:"192.168.1.94/24"}`，`/pair` → 400（未部署），
+不带令牌 → 403。
+
+安装过程中实机暴露并修掉的两个 bug：
+1. 客户端模块 `id` 必须是**包名**，写成 `remote-panel` 会「loaded without registering」，整个 SPA 启动失败；
+2. `ctx.layout` 未在 `inject` 声明会抛异常，两个插槽组件崩溃。
+
+> 仍未覆盖：手机真机上的触摸与软键盘行为。
 
 ## 尚未覆盖
 
