@@ -130,3 +130,16 @@ test('网络密钥含引号/空格/美元符仍被拒', () => {
 	assert.throws(() => renderDeploy({ ...base, networkSecret: 'a b12345678' }), /网络密钥/)
 	assert.throws(() => renderDeploy({ ...base, networkSecret: 'a$b12345678' }), /网络密钥/)
 })
+
+test('Caddyfile 支持 k+token 一次扫码', () => {
+	const { files } = renderDeploy(base)
+	const caddy = files['~/.config/caddy/Caddyfile']
+	assert.match(caddy, /@withToken query token=\*/)
+	assert.match(caddy, /redir \* \/\?token=\{query\.token\} 303/)
+})
+
+test('pairingUrls 生成 combo', async () => {
+	const { pairingUrls } = await import('../lib/pair.js')
+	const urls = pairingUrls({ ip: '10.0.0.1', port: 8710, accessKey: 'k'.repeat(24), token: 't'.repeat(24) })
+	assert.equal(urls.combo, `http://10.0.0.1:8710/?k=${'k'.repeat(24)}&token=${'t'.repeat(24)}`)
+})

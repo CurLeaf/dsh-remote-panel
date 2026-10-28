@@ -26,9 +26,15 @@
 		handle @key {
 			# Cookie 值就是口令本身（24 位随机），而不是常量：常量能被手工伪造
 			header Set-Cookie "dsh_gate=@@ACCESS_KEY@@; Max-Age=31536000; Path=/; HttpOnly; SameSite=Lax"
-			# 显式写 * 匹配器：否则开头的 / 会被当成路径匹配器，
-			# 变成 Location: 303 的怪响应
-			redir * / 303
+
+			# 一张二维码走完两步：带 token 时转发到令牌地址，不带则回首页
+			@withToken query token=*
+			handle @withToken {
+				redir * /?token={query.token} 303
+			}
+			handle {
+				redir * / 303
+			}
 		}
 
 		# Caddy 默认没有 cookie 匹配器，用 Header 通配匹配替代
