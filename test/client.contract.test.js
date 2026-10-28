@@ -85,7 +85,7 @@ test('apply 注册设置分区与移动端外壳插槽', () => {
 	assert.equal(byName.get('conversation.header.leading').registration.id, 'remote-panel.hamburger')
 })
 
-test('设置分区组件浅渲染不抛错', () => {
+test('每个面板组件浅渲染都不抛错', () => {
 	const exports = loadBundle().factory(fakeRequire)
 	const components = []
 	const ctx = {
@@ -99,7 +99,18 @@ test('设置分区组件浅渲染不抛错', () => {
 	}
 	exports.apply(ctx)
 	assert.equal(components.length, 1)
-	// 浅渲染：Panel 会把 StatusCard / DataPlaneCard / PairCard / AllowlistCard /
-	// SelfCheckCard / WizardCard 全部调用一遍
-	assert.doesNotThrow(() => components[0]({}))
+
+	// 逐个渲染，防止再次出现「某个分支引用了未声明的变量」这类只在渲染期暴露的问题
+	const props = {
+		Panel: {},
+		DeployWizard: { onDeployed: () => {} },
+		StatusCard: { state: { ip: '10.0.0.1', port: 8710 }, version: '0.1.0', onRedeploy: () => {} },
+		PairCard: {},
+		AccessCard: {},
+		StaleBanner: {},
+	}
+	for (const [name, component] of Object.entries(exports.components)) {
+		assert.doesNotThrow(() => component(props[name] ?? {}), `${name} 渲染抛错`)
+	}
+	assert.equal(typeof components[0], 'function')
 })
