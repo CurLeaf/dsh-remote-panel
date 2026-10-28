@@ -200,3 +200,17 @@ test('解析与判定小工具', () => {
 	assert.equal(ipInCidr('10.20.0.2', '10.20.0.0/30'), true)
 	assert.equal(ipInCidr('10.20.0.5', '10.20.0.0/30'), false)
 })
+
+test('目标网卡名与现有网卡冲突 → warn', async () => {
+	const result = await runDoctor({ ...base, devName: 'tun0' })
+	const dev = result.checks.find((check) => check.id === 'net.dev')
+	assert.equal(dev.state, 'warn')
+	assert.match(dev.detail, /已被占用/)
+})
+
+test('默认网卡名可用', async () => {
+	const result = await runDoctor(base)
+	const dev = result.checks.find((check) => check.id === 'net.dev')
+	assert.equal(dev.state, 'ok')
+	assert.match(dev.detail, /dshmesh0/)
+})

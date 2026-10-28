@@ -103,3 +103,19 @@ test('未收录的版本只跳过校验，不阻断部署', () => {
 	assert.match(install, /ET_SHA_X86_64=''/)
 	assert.match(install, /跳过校验/)
 })
+
+test('unit 显式指定 --dev-name，且写入 env 文件', () => {
+	const { install, files } = renderDeploy(base)
+	assert.match(install, /--dev-name "\$\{ET_DEV_NAME\}"/)
+	assert.match(files['/etc/easytier/dsh-remote.env'], /ET_DEV_NAME='dshmesh0'/)
+})
+
+test('可自定义网卡名', () => {
+	const { install } = renderDeploy({ ...base, devName: 'dshnet1' })
+	assert.match(install, /ET_DEV_NAME='dshnet1'/)
+})
+
+test('非法网卡名被拒', () => {
+	assert.throws(() => renderDeploy({ ...base, devName: 'Tun0' }), /TUN 网卡名/)
+	assert.throws(() => renderDeploy({ ...base, devName: 't' }), /TUN 网卡名/)
+})

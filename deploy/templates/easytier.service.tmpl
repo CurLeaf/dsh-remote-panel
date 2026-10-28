@@ -12,6 +12,7 @@ ExecStart=/usr/local/bin/easytier-core \
 	--network-name "${ET_NETWORK}" \
 	--network-secret "${ET_SECRET}" \
 	--ipv4 "${ET_IPV4}" \
+	--dev-name "${ET_DEV_NAME}" \
 	--hostname "${ET_HOSTNAME}" \
 	@@PEERS_FLAGS@@ \
 	@@TCP_WHITELIST@@
