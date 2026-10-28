@@ -153,3 +153,20 @@ Panel → 六张卡全部走一遍渲染。
 改法：令牌落到 `$DSH_HOME/remote-panel-token`（0600），启动时读、缺失才生成。
 验证：服务端带令牌 200 / 不带 403；落盘文件 33 字节、权限 `-rw-------`；
 两次调用返回同一值（测试覆盖）。删文件等价于「作废所有已打开页面」。
+
+## 2026-10-28 · 首次真机部署（本机）
+
+结果：EasyTier 入网成功，Caddy 起来后虚拟网内 `healthz=200`、门禁 `401`。
+
+```
+10.140.140.223/24  dsh-linux   Local
+10.140.140.1/24    VM-0-14-tencentos  p2p  25.5ms  udp,tcp,ws
+```
+
+踩到并修掉的一个坑：**apt 安装 caddy 会顺手启一个系统级 `caddy.service`**，
+它占住 `127.0.0.1:2019` 管理端口，导致用户级实例无限重启
+（`starting caddy administration endpoint: bind: address already in use`）。
+部署脚本已加：装完包后若发现 `caddy.service` 处于 enabled/active，就停用它。
+
+另一个坑：网卡名默认值不确定，本机已有 `tun0`（Karing）与 `tailscale0`。
+脚本已强制 `--dev-name dshmesh0`，实测新建的 `dshmesh0` 与 `tun0`、`tailscale0` 并存且互不影响。

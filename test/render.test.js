@@ -119,3 +119,14 @@ test('非法网卡名被拒', () => {
 	assert.throws(() => renderDeploy({ ...base, devName: 'Tun0' }), /TUN 网卡名/)
 	assert.throws(() => renderDeploy({ ...base, devName: 't' }), /TUN 网卡名/)
 })
+
+test('网络密钥允许既有网络的弱口令（含 @）', () => {
+	const { files } = renderDeploy({ ...base, networkSecret: '123456qqQQ@' })
+	assert.match(files['/etc/easytier/dsh-remote.env'], /ET_SECRET='123456qqQQ@'/)
+})
+
+test('网络密钥含引号/空格/美元符仍被拒', () => {
+	assert.throws(() => renderDeploy({ ...base, networkSecret: "a'b12345678" }), /网络密钥/)
+	assert.throws(() => renderDeploy({ ...base, networkSecret: 'a b12345678' }), /网络密钥/)
+	assert.throws(() => renderDeploy({ ...base, networkSecret: 'a$b12345678' }), /网络密钥/)
+})

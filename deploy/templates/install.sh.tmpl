@@ -120,6 +120,15 @@ if ! command -v caddy >/dev/null; then
 	else
 		die "无法自动安装 Caddy：请手动安装后重跑（https://caddyserver.com/docs/install）"
 	fi
+
+	# apt/dnf 的 caddy 包会顺手起一个系统级实例，占住 127.0.0.1:2019 管理端口，
+	# 导致我们的用户级实例无限重启。这里把它停掉——本项目固定用用户级实例。
+	if systemctl list-unit-files caddy.service >/dev/null 2>&1; then
+		if systemctl is-enabled --quiet caddy 2>/dev/null || systemctl is-active --quiet caddy 2>/dev/null; then
+			log "停用系统级 caddy.service（改用用户级实例，避免 2019 端口冲突）"
+			systemctl disable --now caddy >/dev/null 2>&1 || true
+		fi
+	fi
 fi
 
 install -d -m 700 -o "$TARGET_USER" -g "$(id -gn "$TARGET_USER")" "$CADDY_DIR"
