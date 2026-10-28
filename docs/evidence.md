@@ -109,13 +109,29 @@ chrome --headless=new --remote-debugging-port=9333 --remote-allow-origins='*' --
 | `.dsh-mobile-hamburger` | `flex` | `none` |
 | 控制台错误 | 0 | 0 |
 
+设置面板实测文本（六块齐全、无控制台错误）：
+
+```
+控制面 v0.1.0 · 运行 1592s
+数据面 未部署 · 回填框
+配对 需要先部署
+来源白名单 读取 Caddyfile 失败：ENOENT（未部署，预期）
+自检 布局 canary 命中 / 版本一致 / 上游 DSH 可达
+部署向导 六字段 + 高级选项
+```
+
 控制面 API（带注入令牌）：`/status` → `{ok:true,version:"0.1.0",deployed:false}`，
 `/defaults` → `{user:"yxw",port:8710,lanCidr:"192.168.1.94/24"}`，`/pair` → 400（未部署），
 不带令牌 → 403。
 
-安装过程中实机暴露并修掉的两个 bug：
+安装过程中实机暴露并修掉的三个 bug：
 1. 客户端模块 `id` 必须是**包名**，写成 `remote-panel` 会「loaded without registering」，整个 SPA 启动失败；
-2. `ctx.layout` 未在 `inject` 声明会抛异常，两个插槽组件崩溃。
+2. `ctx.layout` 未在 `inject` 声明会抛异常，两个插槽组件崩溃；
+3. 批量替换把「IP 冲突提示」那行同时插进了 DataPlaneCard 与 AllowlistCard，
+   而只有 Wizard 声明了 `warning` 状态 → 设置面板整块 `ReferenceError` 后空白。
+
+第 3 条已由新增的「设置分区组件浅渲染」测试兜住：假 `jsx` 会真正调用函数组件，
+Panel → 六张卡全部走一遍渲染。
 
 > 仍未覆盖：手机真机上的触摸与软键盘行为。
 
