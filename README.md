@@ -76,6 +76,7 @@ dsh plugin --profile web add dsh-remote-panel
 | `/healthz` 返回 200 | 链路本身健康 | 问题在认证层，不在网络层 |
 | 手机「一直连接中」 | 系统浏览器会周期性切断 WebSocket | 换 Chrome |
 | 能 ping 通但页面转圈 | 代理软件（如 Karing）抢走了 EasyTier 流量 | 给中继地址加「直连」规则 |
+| 面板报 `no route: GET /doctor` | Host 侧代码在内存里，加路由后没重启 | `systemctl --user restart dsh-web` |
 
 面板「自检」里的**布局 canary** 用来发现 DSH 升级导致的选择器失配；「复制诊断包」导出的 JSON 已剔除口令与密钥。
 
