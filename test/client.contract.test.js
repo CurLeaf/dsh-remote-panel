@@ -25,9 +25,19 @@ function loadBundle() {
 
 function fakeRequire(id) {
 	if (id === 'react') {
-		return { useCallback: () => {}, useEffect: () => {}, useState: () => [] }
+		return {
+			useCallback: (fn) => fn,
+			useEffect: () => {},
+			useRef: (value) => ({ current: value }),
+			useState: (value) => [typeof value === 'function' ? value() : value, () => {}],
+		}
 	}
-	if (id === 'react/jsx-runtime') return { jsx: () => null, jsxs: () => null }
+	if (id === 'react/jsx-runtime') {
+		// 关键：函数组件要被真正调用，否则组件体内的错误（比如引用了未声明的变量）
+		// 永远不会在测试里暴露
+		const render = (type, props) => (typeof type === 'function' ? type(props ?? {}) : null)
+		return { jsx: render, jsxs: render }
+	}
 	throw new Error(`unexpected require: ${id}`)
 }
 
@@ -73,4 +83,23 @@ test('apply 注册设置分区与移动端外壳插槽', () => {
 
 	assert.equal(byName.get('shell.overlay').registration.id, 'remote-panel.mobile-bar')
 	assert.equal(byName.get('conversation.header.leading').registration.id, 'remote-panel.hamburger')
+})
+
+test('设置分区组件浅渲染不抛错', () => {
+	const exports = loadBundle().factory(fakeRequire)
+	const components = []
+	const ctx = {
+		slots: {
+			inject: (_name, setup) => setup(),
+			register: (registration, component) => {
+				if (registration.name === 'settings.section') components.push(component)
+				return () => {}
+			},
+		},
+	}
+	exports.apply(ctx)
+	assert.equal(components.length, 1)
+	// 浅渲染：Panel 会把 StatusCard / DataPlaneCard / PairCard / AllowlistCard /
+	// SelfCheckCard / WizardCard 全部调用一遍
+	assert.doesNotThrow(() => components[0]({}))
 })
