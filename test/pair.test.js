@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { findToken, pairingUrls, parseToken, renderQr } from '../lib/pair.js'
+import { findToken, findTokens, pairingUrls, parseToken, parseTokens, renderQr, verifyToken } from '../lib/pair.js'
 
 const sample = `
 dsh web listening on http://127.0.0.1:3080/?token=aaaaaaaaaaaaaaaaaaaaaaaa
@@ -58,4 +58,31 @@ test('pairingUrls 顺序与内容', () => {
 test('renderQr 输出 svg', async () => {
 	const svg = await renderQr('http://10.140.140.223:8710/?token=x')
 	assert.match(svg, /^<svg/)
+})
+
+test('parseTokens 按端口过滤且保序', () => {
+	const text = 'http://127.0.0.1:3080/?token=aaaaaaaaaaaaaaaaaaaaaaaa\nhttp://10.0.0.1:8710/?token=bbbbbbbbbbbbbbbbbbbbbbbb'
+	assert.deepEqual(parseTokens(text, 8710), ['bbbbbbbbbbbbbbbbbbbbbbbb'])
+	assert.deepEqual(parseTokens(text, [3080, 8710]), ['aaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbb'])
+	assert.equal(parseTokens(text).length, 2)
+})
+
+test('findTokens 返回数组', async () => {
+	const all = await findTokens({ exec: async () => ({ stdout: sample }) })
+	assert.equal(all.length, 3)
+	assert.equal(all.at(-1), 'bbbbbbbbbbbbbbbbbbbbbbbb')
+
+	const only3080 = await findTokens({ ports: [3080], exec: async () => ({ stdout: sample }) })
+	assert.deepEqual(only3080, ['aaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbb'])
+})
+
+test('verifyToken 只认 303', async () => {
+	const ok = await verifyToken('t', 3080, async () => ({ status: 303 }))
+	const bad = await verifyToken('t', 3080, async () => ({ status: 401 }))
+	const thrown = await verifyToken('t', 3080, async () => {
+		throw new Error('boom')
+	})
+	assert.equal(ok, true)
+	assert.equal(bad, false)
+	assert.equal(thrown, false)
 })

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
+import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { findFreePort } from '../lib/api.js'
 import { API_PREFIX, TOKEN_HEADER, handleRequest } from '../lib/index.js'
@@ -108,7 +111,16 @@ test('findFreePort 跳过被占用的端口', async () => {
 })
 
 test('GET /pair 未部署时为 400', async () => {
-	const { status, body } = await call({ url: `${API_PREFIX}/pair` })
-	assert.equal(status, 400)
-	assert.match(body.error, /尚未部署/)
+	const home = mkdtempSync(join(tmpdir(), 'panel-api-'))
+	const previous = process.env.DSH_HOME
+	process.env.DSH_HOME = home
+	try {
+		const { status, body } = await call({ url: `${API_PREFIX}/pair` })
+		assert.equal(status, 400)
+		assert.match(body.error, /尚未部署/)
+	} finally {
+		if (previous === undefined) delete process.env.DSH_HOME
+		else process.env.DSH_HOME = previous
+		rmSync(home, { recursive: true, force: true })
+	}
 })
