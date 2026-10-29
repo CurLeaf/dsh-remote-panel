@@ -38,6 +38,14 @@
     - 不再有「深度思考 / 智能搜索」胶囊；参考图里那枚语音键换成发送箭头
     - 原独立胶囊输入框 + 独立发送键的形状废弃
 
+  2026-10-29 迭代 5：
+    - 「添加文件或指令」浮窗（.command-menu）：复刻 DSH 命令菜单的分组与行形态
+      （分组标题「添加 / 指令」，行 = 线性图标 + 中文名 + 命令别名 + 次级描述）
+    - 触发按钮从按钮行右端挪到左下角；发送仍在右下角（.composer__row 改 space-between）
+    - 二次点击 + 关闭浮窗、再点打开；点浮窗外、Esc、开抽屉/切插件页也会收起
+    - 选中行后输入区换成指令胶囊（.composer__chip）或附件卡片（.composer__attach）
+    - 浮窗数据：file / goal / plan / feedback / compact / permission / model / export / rea
+
   2026-10-29 迭代 4：
     - 搜索从「只搜会话名」改成「搜对话内容」：placeholder 改为 搜索对话内容...
     - 模拟 Host 的历史检索：输入停顿 250ms 才发请求（对齐 client 的 SEARCH_DEBOUNCE_MS），请求期铺骨架屏
@@ -48,8 +56,16 @@
       两端加省略号，空白归一（同 dsh-session-query-sqlite 的 makeSnippet）
     - 结果顺序照 DSH：标题/工作区命中在前，纯内容命中在后；搜索时折叠组强制展开
 
+  2026-10-29 迭代 6：
+    - 输入区换成真的 textarea（原来是写死的 div +「输入消息…」那段文字）
+    - 最大高度跟宿主对齐：dsh-client-ui-conversation 是 336px
+      （--dsh-composer-text-max-height），手机上再按屏高收敛成 30vh
+    - 原型是固定 390×844 的框，所以用 --composer-max-height: min(336px, 253px)，
+      不跟着浏览器窗口变；真机上直接写 min(336px, 30vh)
+    - 到顶后在输入框内部滚动，不再继续把对话区顶上去
+
   改完保存、刷新即可。
-  支持的调试参数：?drawer=1&tab=plugins&notes=1&search=1&q=关键词
+  支持的调试参数：?drawer=1&tab=plugins&notes=1&search=1&q=关键词&menu=1
 -->
 <style>
   /* ---------------------------------------------------------------- tokens */
@@ -169,6 +185,9 @@
     border-radius: 56px;
     background: var(--bezel);
     box-shadow: var(--shadow), inset 0 0 0 1px rgba(255, 255, 255, .07);
+    /* 输入框最大高度：宿主是 min(336px, 30vh)，844 高的机型约 253px。
+       原型里是固定 390×844 的框，用定值才不会跟着浏览器窗口变。 */
+    --composer-max-height: min(336px, 253px);
   }
   .screen {
     /* 常态纯黑；只有抽屉展开时，非抽屉区域才抬到 #1d1d1d */
@@ -381,6 +400,7 @@
   /* ---------------------------------------------------------------- composer */
   /* 整块输入条：上面一行文字，下面一行圆形按钮（对齐官方 App 的输入框） */
   .composer {
+    position: relative;
     flex: 0 0 auto;
     padding: 8px 12px 16px;
   }
@@ -393,16 +413,105 @@
     background: #1e1e21;
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05);
   }
+  /* 已选附件：模拟「文件」行插入的一张卡片 */
+  .composer__attach {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    align-self: flex-start;
+    margin: -2px 0 0;
+    padding: 5px 9px 5px 8px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .07);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text);
+  }
+  .device[data-attachment="true"] .composer__attach { display: inline-flex; }
+  .composer__attach svg { flex: 0 0 14px; opacity: .62; }
+  .composer__attach-remove {
+    width: 16px;
+    height: 16px;
+    margin-left: 2px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, .1);
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+  }
   .composer__input {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
     min-height: 24px;
     font-size: 16px;
     line-height: 24px;
+  }
+  /* 真实输入框：跟着内容长高，到 --composer-max-height 就内部滚动。
+     上限 = min(336px, 30vh)：336px 是宿主 dsh-client-ui-conversation 的
+     --dsh-composer-text-max-height，手机上再按屏高收敛（390×844 的机器约 253px）。 */
+  .composer__textarea {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    resize: none;
+    overflow-y: hidden;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 16px;
+    line-height: 24px;
+    max-height: var(--composer-max-height);
+    overscroll-behavior: contain;
+  }
+  .composer__textarea::placeholder { color: var(--muted); opacity: 1; }
+  .composer__textarea:focus-visible { outline: none; }
+  /* 已选指令：模拟 DSH 把 /rea 换成的胶囊 */
+  .composer__chip {
+    display: none;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 4px 1px 9px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .09);
+    font-size: 13px;
+    line-height: 22px;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .device[data-command="true"] .composer__chip { display: inline-flex; }
+  .composer__chip-alias { color: var(--muted); font-size: 11px; }
+  .composer__chip-remove {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, .1);
     color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
   }
   .composer__row {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    /* 「+」左下角、「发送」右下角 */
+    justify-content: space-between;
     gap: 10px;
     padding-right: 2px;
   }
@@ -417,13 +526,16 @@
     border-radius: 50%;
     cursor: pointer;
   }
-  /* 加号：描边圆，和参考图右端那枚一致 */
+  /* 加号：描边圆，挪到按钮行左端 */
   .composer__add {
     border: 1px solid var(--line-strong);
     background: transparent;
     color: var(--text);
+    transition: background .15s ease, transform .15s ease;
   }
   .composer__add:hover { background: rgba(255, 255, 255, .06); }
+  /* 打开态只加深底色，加号本身不变形（对齐 DSH 的 + 按钮） */
+  .composer__add[aria-expanded="true"] { background: rgba(255, 255, 255, .12); }
   /* 发送：同一枚圆形按钮，主色实心 */
   .composer__send {
     border: 0;
@@ -433,6 +545,102 @@
   .composer__send:hover { filter: brightness(1.08); }
   .composer__add svg,
   .composer__send svg { display: block; }
+
+  /* ---------------------------------------------------------------- command menu */
+  /* 「添加文件或调用指令」浮窗：贴在输入条上方，按钮二次点击关闭 */
+  .command-menu {
+    position: absolute;
+    left: 20px;
+    right: 20px;
+    bottom: calc(100% + 2px);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    max-height: 424px;
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 16px;
+    background: #1c1c1c;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, .55), 0 1px 2px rgba(0, 0, 0, .4);
+    overflow: hidden;
+  }
+  .command-menu[hidden] { display: none; }
+  .command-menu__scroll {
+    min-height: 0;
+    padding: 6px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, .16) transparent;
+  }
+  .command-menu__scroll::-webkit-scrollbar { width: 6px; }
+  .command-menu__scroll::-webkit-scrollbar-thumb {
+    border-radius: 3px;
+    background: rgba(255, 255, 255, .16);
+  }
+  .command-menu__scroll::-webkit-scrollbar-track { background: transparent; }
+  .command-menu__title {
+    padding: 8px 10px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    color: var(--muted);
+  }
+  .command-menu__title:not(:first-child) { padding-top: 12px; }
+  .command-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 10px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .command-row:hover,
+  .command-row:focus-visible {
+    outline: none;
+    background: rgba(255, 255, 255, .07);
+  }
+  .command-row__icon {
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    margin-top: 1px;
+    opacity: .62;
+  }
+  .command-row__icon svg { display: block; width: 16px; height: 16px; }
+  .command-row__main { flex: 1; min-width: 0; }
+  .command-row__head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+  }
+  .command-row__name {
+    flex: 0 0 auto;
+    font-size: 14px;
+    line-height: 18px;
+  }
+  .command-row__alias {
+    flex: 0 0 auto;
+    font-size: 11px;
+    line-height: 18px;
+    color: var(--muted);
+  }
+  .command-row__desc {
+    margin-top: 2px;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 15px;
+    color: var(--muted);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
 
   /* ---------------------------------------------------------------- drawer */
   /* 非抽屉区域遮罩：点击关闭；抽屉本体在上层，不接收遮罩点击。 */
@@ -1285,10 +1493,173 @@
               </section>
 
               <footer class="composer">
+                <!-- 「添加文件或调用指令」浮窗：贴在输入条上方，按钮二次点击关闭 -->
+                <div class="command-menu" id="commandMenu" role="menu" aria-label="添加文件或调用指令" tabindex="-1" hidden>
+                  <div class="command-menu__scroll">
+                    <div class="command-menu__title" role="presentation">添加</div>
+                    <button type="button" class="command-row" role="menuitem" data-cmd="file" data-menu-kind="file" data-label="文件" data-alias="file">
+                      <span class="command-row__icon" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M10.6 5.3 6 9.9a1.6 1.6 0 0 0 2.3 2.3l4.9-4.9a3 3 0 0 0-4.2-4.2L4.1 8a4.4 4.4 0 0 0 6.2 6.2"/>
+                        </svg>
+                      </span>
+                      <span class="command-row__main">
+                        <span class="command-row__head">
+                          <span class="command-row__name">文件</span>
+                          <span class="command-row__alias">file</span>
+                        </span>
+                      </span>
+                    </button>
+                    <button type="button" class="command-row" role="menuitem" data-cmd="goal" data-label="目标" data-alias="goal" data-hint="输入目标描述…">
+                      <span class="command-row__icon" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                          <circle cx="8" cy="8" r="5.6"/>
+                          <circle cx="8" cy="8" r="2.4"/>
+                          <path d="M8 1.4v1.6M8 13v1.6M1.4 8h1.6M13 8h1.6"/>
+                        </svg>
+                      </span>
+                      <span class="command-row__main">
+                        <span class="command-row__head">
+                          <span class="command-row__name">目标</span>
+                          <span class="command-row__alias">goal</span>
+                        </span>
+                        <span class="command-row__desc">设置或查看长期任务目标</span>
+                      </span>
+                    </button>
+                    <button type="button" class="command-row" role="menuitem" data-cmd="plan" data-label="计划" data-alias="plan" data-hint="输入计划内容…">
+                      <span class="command-row__icon" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M2.6 4.4h6.2M2.6 8h6.2M2.6 11.6h4"/>
+                          <path d="m11 9.4 1.4 1.4 2.1-2.6"/>
+                        </svg>
+                      </span>
+                      <span class="command-row__main">
+                        <span class="command-row__head">
+                          <span class="command-row__name">计划</span>
+                          <span class="command-row__alias">plan</span>
+                        </span>
+                        <span class="command-row__desc">进入或退出计划模式</span>
+                      </span>
+                    </button>
+                    <button type="button" class="command-row" role="menuitem" data-cmd="feedback" data-label="反馈" data-alias="feedback" data-hint="描述你遇到的问题…">
+                      <span class="command-row__icon" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M14 2 2.4 6.6l4.3 1.7 1.7 4.3L14 2Z"/>
+                          <path d="M6.7 8.3 14 2"/>
+                        </svg>
+                      </span>
+                      <span class="command-row__main">
+                        <span class="command-row__head">
+                          <span class="command-row__name">反馈</span>
+                          <span class="command-row__alias">feedback</span>
+                        </span>
+                        <span class="command-row__desc">发送关于当前会话的反馈</span>
+                      </span>
+                    </button>
+
+                    <div class="command-menu__title" role="presentation">指令</div>
+                    <button type="button" class="command-row" role="menuitem" data-cmd="compact" data-label="压缩" data-alias="compact" data-hint="输入可选的补充说明…">
+                      <span class="command-row__icon" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M13.4 8a5.4 5.4 0 1 1-1.7-3.9"/>
+                          <path d="M13.6 2.4v3h-3"/>
+                          <path d="M8 5.6v2.6l1.8 1"/>
+                        </svg>
+                      </span>
+                      <span class="command-row__main">
+                        <span class="command-row__head">
+                          <span class="command-row__name">压缩</span>
+                          <span class="command-row__alias">compact</span>
+                        </span>
+                        <span class="command-row__desc">压缩以上对话内容</span>
+                      </span>
+                    </button>
+                    <button type="button" class="command-row" role="menuitem" data-cmd="permission" data-label="权限" data-alias="permission">
+                      <span class="command-row__icon" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M8 1.8 3.2 3.6v4c0 3.2 2 5.4 4.8 6.6 2.8-1.2 4.8-3.4 4.8-6.6v-4L8 1.8Z"/>
+                          <path d="m6.1 7.9 1.4 1.4 2.5-2.7"/>
+                        </svg>
+                      </span>
+                      <span class="command-row__main">
+                        <span class="command-row__head">
+                          <span class="command-row__name">权限</span>
+                          <span class="command-row__alias">permission</span>
+                        </span>
+                        <span class="command-row__desc">切换权限预设（沙箱模式与审批策略）</span>
+                      </span>
+                    </button>
+                    <button type="button" class="command-row" role="menuitem" data-cmd="model" data-label="模型" data-alias="model">
+                      <span class="command-row__icon" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                          <ellipse cx="8" cy="4" rx="4.8" ry="1.9"/>
+                          <path d="M3.2 4v3.6c0 1 2.1 1.9 4.8 1.9s4.8-.9 4.8-1.9V4"/>
+                          <path d="M3.2 7.6V11c0 1 2.1 1.9 4.8 1.9s4.8-.9 4.8-1.9V7.6"/>
+                        </svg>
+                      </span>
+                      <span class="command-row__main">
+                        <span class="command-row__head">
+                          <span class="command-row__name">模型</span>
+                          <span class="command-row__alias">model</span>
+                        </span>
+                        <span class="command-row__desc">选择本会话使用的模型</span>
+                      </span>
+                    </button>
+                    <button type="button" class="command-row" role="menuitem" data-cmd="export" data-label="下载日志" data-alias="export">
+                      <span class="command-row__icon" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M8 2.2v7.2"/>
+                          <path d="M5.2 6.6 8 9.4l2.8-2.8"/>
+                          <path d="M2.8 11.4v1.4c0 .4.3.7.7.7h9c.4 0 .7-.3.7-.7v-1.4"/>
+                        </svg>
+                      </span>
+                      <span class="command-row__main">
+                        <span class="command-row__head">
+                          <span class="command-row__name">下载日志</span>
+                          <span class="command-row__alias">export</span>
+                        </span>
+                        <span class="command-row__desc">将当前会话内容导出为 ZIP</span>
+                      </span>
+                    </button>
+                    <button type="button" class="command-row" role="menuitem" data-cmd="rea" data-label="逆向分析" data-alias="rea" data-hint="输入目标路径或问题…">
+                      <span class="command-row__icon" aria-hidden="true">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                          <circle cx="7" cy="7" r="4.4"/>
+                          <path d="m10.3 10.3 3 3"/>
+                          <path d="M5.2 7h3.6M7 5.2v3.6"/>
+                        </svg>
+                      </span>
+                      <span class="command-row__main">
+                        <span class="command-row__head">
+                          <span class="command-row__name">逆向分析</span>
+                          <span class="command-row__alias">rea</span>
+                        </span>
+                        <span class="command-row__desc">用 REA 逆向分析目标</span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
                 <div class="composer__bar">
-                  <div class="composer__input">输入消息…</div>
+                  <div class="composer__attach" id="composerAttach">
+                    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M9.6 3.4H5.2A1.2 1.2 0 0 0 4 4.6v6.8a1.2 1.2 0 0 0 1.2 1.2h5.6a1.2 1.2 0 0 0 1.2-1.2V5.8L9.6 3.4Z"/>
+                      <path d="M9.4 3.6v2.2H12"/>
+                    </svg>
+                    <span id="composerAttachName">app.asar</span>
+                    <button type="button" class="composer__attach-remove" data-act="clear-attachment" aria-label="移除附件">×</button>
+                  </div>
+                  <div class="composer__input">
+                    <span class="composer__chip" id="composerChip">
+                      <span id="composerChipLabel">逆向分析</span>
+                      <span class="composer__chip-alias" id="composerChipAlias">rea</span>
+                      <button type="button" class="composer__chip-remove" data-act="clear-command" aria-label="取消指令">×</button>
+                    </span>
+                    <textarea class="composer__textarea" id="composerInput" rows="1" placeholder="输入消息…" aria-label="输入消息" enterkeyhint="send"></textarea>
+                  </div>
                   <div class="composer__row">
-                    <button type="button" class="composer__add" aria-label="添加文件或调用指令" title="添加文件或调用指令">
+                    <button type="button" class="composer__add" id="composerAdd" aria-label="添加文件或调用指令" title="添加文件或调用指令"
+                            aria-haspopup="menu" aria-expanded="false">
                       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true">
                         <path d="M8 3.2v9.6"/>
                         <path d="M3.2 8h9.6"/>
@@ -1313,9 +1684,13 @@
 
     <aside class="notes">
       <h2>移动外壳原型</h2>
-      <p>390 × 844。基线按 <code>lib/client.js</code> 的 SHELL_CSS / MobileBar 复刻；本轮已改触发按钮、新对话标题、右上角新建对话、新对话区鱼标与问候语、会话行 ⋯ 菜单（重命名 / 置顶 / 归档，苹果备忘录式分组：线性图标 + 内缩淡分割线）；抽屉改成按工作区分组（4 组，点标题折叠 / 展开，文件夹图标随折叠换开 / 合，当前会话所在组高亮，搜索时强制展开并显示「命中 / 总数」）；整页固定纯黑底、去掉分割线；移除底部三栏；输入条改成一整块圆角卡片（文字在上，右下两枚圆形按钮：描边「+」与主色「发送」，没有「深度思考 / 智能搜索」胶囊）。点左上角按钮开抽屉，点遮罩关抽屉；点搜索框会撑满页面，左上返回键回抽屉；插件页暂时用 <code>?tab=plugins</code> 打开。</p>
+      <p>390 × 844。基线按 <code>lib/client.js</code> 的 SHELL_CSS / MobileBar 复刻；本轮已改触发按钮、新对话标题、右上角新建对话、新对话区鱼标与问候语、会话行 ⋯ 菜单（重命名 / 置顶 / 归档，苹果备忘录式分组：线性图标 + 内缩淡分割线）；抽屉改成按工作区分组（4 组，点标题折叠 / 展开，文件夹图标随折叠换开 / 合，当前会话所在组高亮，搜索时强制展开并显示「命中 / 总数」）；整页固定纯黑底、去掉分割线；移除底部三栏；输入条改成一整块圆角卡片（文字在上，按钮行两端各一枚圆形按钮：左下标描「+」、右下主色「发送」，没有「深度思考 / 智能搜索」胶囊）。点左上角按钮开抽屉，点遮罩关抽屉；点搜索框会撑满页面，左上返回键回抽屉；插件页暂时用 <code>?tab=plugins</code> 打开。</p>
+
+      <p>本轮加了「添加文件或指令」浮窗：点左下角「+」在输入条上方展开，分「添加」与「指令」两组，行 = 线性图标 + 中文名 + 命令别名 + 次级描述（别名与描述对齐 DSH 的 <code>commands/list</code> 菜单）。「+」二次点击收起、再点展开；点浮窗以外、按 Esc、开抽屉或切到插件页都会收起。选中「指令」行后输入区换成胶囊（标题 + 别名 + ×，提示语跟着换），选中「文件」行会在输入区上方放一张附件卡片；两者互不清除，跟 DSH 允许「带指令又带附件」一致。行数据在 HTML 的 <code>data-cmd / data-label / data-alias / data-hint</code> 上，直接加一行就能扩。</p>
 
       <p>搜索改成了搜对话内容：输入停 250ms 才发请求，等待期铺三行骨架屏，回来后标题命中在前、纯内容命中在后，内容命中在标题下补一行片段（12px 次级色、单行省略，对齐 DSH 的 <code>searchResultSnippet</code>）。正文来自页面底部的 <code>LOGS</code> 假数据，片段按 240 码位裁剪，与 <code>dsh-session-query-sqlite</code> 的 <code>makeSnippet</code> 同一套规则。</p>
+
+      <p>输入区换成了真的 <code>textarea</code>：跟着内容长高，封顶 <code>min(336px, 30vh)</code>——336px 是宿主 <code>dsh-client-ui-conversation</code> 的 <code>--dsh-composer-text-max-height</code>，手机再按屏高收敛；原型是固定 844 高的框，所以取 253px（见 <code>--composer-max-height</code>）。到顶后只在输入框内部滚动，对话区不再被继续顶掉。</p>
 
       <h3>还没解决</h3>
       <ul class="issues">
@@ -1354,7 +1729,12 @@
         <li>工作区 / 会话：<code>.workspace__head</code>、<code>[data-collapsed="true"]</code>、<code>.workspace__icon--open/--closed</code>、<code>.session</code></li>
         <li>会话操作菜单：<code>.session__more</code>、<code>.session-menu</code></li>
         <li>输入条：<code>.composer__bar</code>（整块卡片）、<code>.composer__row</code>（按钮行）、
-          <code>.composer__add</code>、<code>.composer__send</code></li>
+          <code>.composer__add</code>（左下角）、<code>.composer__send</code>（右下角）</li>
+        <li>输入框：<code>.composer__textarea</code>（自动长高，上限见 <code>--composer-max-height</code>）</li>
+        <li>添加浮窗：<code>.command-menu</code>、<code>.command-row</code>、<code>[data-cmd]</code>、
+          <code>[aria-expanded="true"]</code>；行文案在 HTML 的 <code>data-label / data-alias / data-hint</code></li>
+        <li>选中指令 / 附件：<code>.composer__chip</code>、<code>.composer__attach</code>、
+          <code>[data-command="true"]</code>、<code>[data-attachment="true"]</code></li>
         <li>抽屉宽度 / 遮罩 / 关闭：<code>.drawer</code>、<code>.scrim</code>、<code>[data-drawer="true"]</code></li>
         <li>标题显隐：<code>.topbar__title</code></li>
         <li>真机断点：<code>lib/client.js</code> 的 <code>@media (max-width:1023px)</code>；这版固定 390</li>
@@ -1369,7 +1749,7 @@
     const DEFAULT = { drawer: false, tab: 'chat', notes: false, search: false };
     const state = { ...DEFAULT };
 
-    // ?drawer=1&tab=plugins&notes=1&search=1
+    // ?drawer=1&tab=plugins&notes=1&search=1&menu=1
     const params = new URLSearchParams(location.search);
     if (params.has('drawer')) state.drawer = params.get('drawer') === '1';
     if (params.has('tab')) state.tab = params.get('tab') === 'plugins' ? 'plugins' : 'chat';
@@ -1378,6 +1758,7 @@
       state.search = params.get('search') === '1';
       if (state.search) state.drawer = true;
     }
+    const openMenuAtStart = params.get('menu') === '1';
 
     const pressed = {
       'drawer-on': () => state.drawer,
@@ -1489,13 +1870,87 @@
       device.dataset.notes = String(state.notes);
       device.dataset.search = String(state.search);
       if (!state.drawer) closeMenu();
+      // 抽屉 / 插件页打开时，输入条连同浮窗一起收掉
+      if (state.drawer || state.tab !== 'chat') closeCommandMenu();
       Object.entries(pressed).forEach(([act, test]) => {
         const button = document.querySelector(`[data-act="${act}"]`);
         if (button) button.setAttribute('aria-pressed', String(test()));
       });
     }
 
+    /* -------------------------------------------------- 添加文件或调用指令 */
+    /* 与 DSH 一致：+ 二次点击关闭浮窗；选中行后把输入区换成指令胶囊 / 附件卡片。 */
+    const commandMenu = document.getElementById('commandMenu');
+    const commandAdd = document.getElementById('composerAdd');
+    const composerChip = document.getElementById('composerChip');
+    const composerChipLabel = document.getElementById('composerChipLabel');
+    const composerChipAlias = document.getElementById('composerChipAlias');
+    const composerInput = document.getElementById('composerInput');
+    const composerAttachName = document.getElementById('composerAttachName');
+    const DEFAULT_HINT = '输入消息…';
+
+    // 跟着内容长高：先复位成 auto 再量 scrollHeight，到 --composer-max-height 后
+    // 只让输入框自己滚动，不再往上顶对话区。
+    function growComposer() {
+      composerInput.style.height = 'auto';
+      const cap = Number.parseFloat(getComputedStyle(composerInput).maxHeight);
+      const limit = Number.isFinite(cap) ? cap : Number.POSITIVE_INFINITY;
+      composerInput.style.height = `${Math.min(composerInput.scrollHeight, limit)}px`;
+      composerInput.style.overflowY = composerInput.scrollHeight > limit ? 'auto' : 'hidden';
+    }
+
+    composerInput.addEventListener('input', growComposer);
+    growComposer();
+
+    function setCommandMenu(open) {
+      commandMenu.hidden = !open;
+      commandAdd.setAttribute('aria-expanded', String(open));
+      if (open) commandMenu.focus({ preventScroll: true });
+    }
+
+    function closeCommandMenu() {
+      if (!commandMenu.hidden) setCommandMenu(false);
+    }
+
+    function clearCommand() {
+      device.dataset.command = 'false';
+      composerChipLabel.textContent = '';
+      composerChipAlias.textContent = '';
+      composerInput.placeholder = DEFAULT_HINT;
+    }
+
+    function clearAttachment() {
+      device.dataset.attachment = 'false';
+      composerAttachName.textContent = '';
+    }
+
+    function pickCommand(button) {
+      const { label, alias, hint, menuKind } = button.dataset;
+      closeCommandMenu();
+      if (menuKind === 'file') {
+        device.dataset.attachment = 'true';
+        composerAttachName.textContent = 'app.asar';
+        return;
+      }
+      device.dataset.command = 'true';
+      composerChipLabel.textContent = label;
+      composerChipAlias.textContent = alias;
+      composerInput.placeholder = hint ?? DEFAULT_HINT;
+      composerInput.focus({ preventScroll: true });
+    }
+
+    commandAdd.addEventListener('click', () => {
+      // 二次点击关闭：按钮自己的点击先于 document 的「点外部关闭」处理
+      setCommandMenu(commandMenu.hidden);
+    });
+
     document.addEventListener('click', (event) => {
+      // 浮窗内的行：选中后收起浮窗，并把输入区换成胶囊 / 附件
+      const commandRow = event.target.closest('[data-cmd]');
+      if (commandRow) {
+        pickCommand(commandRow);
+        return;
+      }
       const more = event.target.closest('[data-more]');
       if (more) {
         const row = more.closest('.session');
@@ -1514,10 +1969,14 @@
       }
 
       if (!menu.hidden && !event.target.closest('.session-menu')) closeMenu();
+      // 点输入条以外的任何地方关闭指令浮窗；点 + 本身由它自己的监听器切换
+      if (!commandMenu.hidden && !event.target.closest('.composer')) closeCommandMenu();
 
       const target = event.target.closest('[data-act]');
       if (!target) return;
       switch (target.dataset.act) {
+        case 'clear-command': clearCommand(); return;
+        case 'clear-attachment': clearAttachment(); return;
         case 'close-search': exitSearch(); return;
         case 'open-drawer': resetSearch(); state.drawer = true; break;
         case 'close-drawer': resetSearch(); state.drawer = false; break;
@@ -1558,6 +2017,10 @@
 
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
+        if (!commandMenu.hidden) {
+          closeCommandMenu();
+          return;
+        }
         if (!menu.hidden) {
           closeMenu();
           return;
@@ -1868,6 +2331,9 @@
     });
     applyIdle();
     render();
+
+    // ?menu=1：直接展开「添加文件或调用指令」浮窗，方便截图
+    if (openMenuAtStart) setCommandMenu(true);
 
     // ?q=关键词：跳过防抖直接进检索（骨架屏照常走一遍），方便截图与联调
     if (params.has('q')) {
