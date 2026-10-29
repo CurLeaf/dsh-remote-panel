@@ -38,8 +38,18 @@
     - 不再有「深度思考 / 智能搜索」胶囊；参考图里那枚语音键换成发送箭头
     - 原独立胶囊输入框 + 独立发送键的形状废弃
 
+  2026-10-29 迭代 4：
+    - 搜索从「只搜会话名」改成「搜对话内容」：placeholder 改为 搜索对话内容...
+    - 模拟 Host 的历史检索：输入停顿 250ms 才发请求（对齐 client 的 SEARCH_DEBOUNCE_MS），请求期铺骨架屏
+      （真机这条路径是 FTS5 + 冷会话读取，所以等待态是合理的）
+    - 命中按 DSH 的形态渲染：标题命中照常；内容命中在标题下补一行片段
+      （12px 次级色、单行省略，对齐 dsh-client-ui-workspace 的 searchResultSnippet）
+    - 正文取自 LOGS 假数据；片段按 SESSION_SEARCH_SNIPPET_MAX_CODE_POINTS=240 裁剪，
+      两端加省略号，空白归一（同 dsh-session-query-sqlite 的 makeSnippet）
+    - 结果顺序照 DSH：标题/工作区命中在前，纯内容命中在后；搜索时折叠组强制展开
+
   改完保存、刷新即可。
-  支持的调试参数：?drawer=1&tab=plugins&notes=1&search=1
+  支持的调试参数：?drawer=1&tab=plugins&notes=1&search=1&q=关键词
 -->
 <style>
   /* ---------------------------------------------------------------- tokens */
@@ -529,6 +539,66 @@
   .device[data-search="true"][data-query="true"] .sessions { display: block; }
   .device[data-search="true"] .drawer__foot { display: none; }
 
+  /* 等历史检索时：藏掉提示与旧结果，只留骨架屏（DSH 此时显示「正在搜索会话历史…」）。
+     pending 与 query 两条规则特异性相同，靠先后顺序覆盖，所以必须写在这里。 */
+  .device[data-search="true"][data-pending="true"] .search-hint { display: none; }
+  .device[data-search="true"][data-pending="true"] .sessions { display: none; }
+
+  .search-loading {
+    display: none;
+    flex: 1;
+    min-height: 0;
+    padding: 4px 0 12px;
+    overflow: hidden;
+  }
+  .device[data-search="true"][data-pending="true"] .search-loading { display: block; }
+  .search-loading__label {
+    margin: 0 15px 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .skeleton { margin: 1px 10px; padding: 9px 10px 11px; border-radius: 12px; }
+  .skeleton__bar {
+    display: block;
+    height: 9px;
+    border-radius: 999px;
+    background: linear-gradient(100deg, #242427 28%, #33333a 50%, #242427 72%);
+    background-size: 220% 100%;
+    animation: skeleton-shimmer 1.2s ease-in-out infinite;
+    /* 三行错开一点，别像一整块在闪 */
+    animation-delay: var(--skeleton-delay, 0s);
+  }
+  .skeleton__bar--title { width: 62%; }
+  .skeleton__bar--meta {
+    width: 88%;
+    height: 8px;
+    margin-top: 8px;
+  }
+  @keyframes skeleton-shimmer {
+    from { background-position: 170% 0; }
+    to { background-position: -70% 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton__bar { animation: none; }
+  }
+
+  /* 内容命中的片段：DSH 挂在 searchResultMeta 第二行（12px 次级色、单行省略）。
+     抽屉里工作区已经是分组标题，所以只留片段这一行。 */
+  .session[data-snippet="true"] .session__main {
+    flex-wrap: wrap;
+    row-gap: 1px;
+  }
+  .session__snippet {
+    flex: 0 0 100%;
+    order: 9;
+    font-size: 12px;
+    line-height: 17px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .drawer__search {
     display: flex;
     align-items: center;
@@ -864,8 +934,24 @@
                     <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/>
                     <path d="m10.4 10.4 3.1 3.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
                   </svg>
-                  <input type="search" placeholder="搜索会话名称" aria-label="搜索会话名称" enterkeyhint="search" />
+                  <input type="search" placeholder="搜索对话内容..." aria-label="搜索对话内容" enterkeyhint="search" />
                 </label>
+              </div>
+              <!-- 历史检索等待态：三行骨架屏，批次间隔错开一点，别像一整块在闪 -->
+              <div class="search-loading" role="status" aria-live="polite">
+                <div class="search-loading__label">正在搜索会话历史…</div>
+                <div class="skeleton" aria-hidden="true">
+                  <span class="skeleton__bar skeleton__bar--title"></span>
+                  <span class="skeleton__bar skeleton__bar--meta"></span>
+                </div>
+                <div class="skeleton" aria-hidden="true" style="--skeleton-delay: .14s">
+                  <span class="skeleton__bar skeleton__bar--title" style="width: 48%"></span>
+                  <span class="skeleton__bar skeleton__bar--meta"></span>
+                </div>
+                <div class="skeleton" aria-hidden="true" style="--skeleton-delay: .28s">
+                  <span class="skeleton__bar skeleton__bar--title" style="width: 54%"></span>
+                  <span class="skeleton__bar skeleton__bar--meta"></span>
+                </div>
               </div>
               <div class="sessions">
                 <section class="workspace" data-workspace="dsh-remote-panel" data-collapsed="false" data-current="true">
@@ -886,7 +972,7 @@
                     </svg>
                   </button>
                   <div class="workspace__sessions" id="ws-dsh-remote-panel">
-                    <div class="session" data-active="true">
+                    <div class="session" data-session="s1" data-active="true">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">移动端外壳的 UX 讨论</span>
                         <span class="session__time">刚刚</span>
@@ -897,7 +983,7 @@
                         </svg>
                       </button>
                     </div>
-                    <div class="session">
+                    <div class="session" data-session="s2">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">远程访问插件的移动外壳</span>
                         <span class="session__time">10:24</span>
@@ -908,7 +994,7 @@
                         </svg>
                       </button>
                     </div>
-                    <div class="session">
+                    <div class="session" data-session="s3">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">手机端配对二维码</span>
                         <span class="session__time">09:41</span>
@@ -919,7 +1005,7 @@
                         </svg>
                       </button>
                     </div>
-                    <div class="session">
+                    <div class="session" data-session="s4">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">远程面板的令牌落盘</span>
                         <span class="session__time">昨天</span>
@@ -930,7 +1016,7 @@
                         </svg>
                       </button>
                     </div>
-                    <div class="session">
+                    <div class="session" data-session="s5">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">移动端抽屉的遮罩</span>
                         <span class="session__time">周一</span>
@@ -961,7 +1047,7 @@
                     </svg>
                   </button>
                   <div class="workspace__sessions" id="ws-dsh-browser-studio">
-                    <div class="session">
+                    <div class="session" data-session="s6">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">浏览器预览 iframe 方案</span>
                         <span class="session__time">昨天</span>
@@ -972,7 +1058,7 @@
                         </svg>
                       </button>
                     </div>
-                    <div class="session">
+                    <div class="session" data-session="s7">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">iframe 截图与 CDP 通道</span>
                         <span class="session__time">周一</span>
@@ -983,7 +1069,7 @@
                         </svg>
                       </button>
                     </div>
-                    <div class="session">
+                    <div class="session" data-session="s8">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">预览抽屉的缩放</span>
                         <span class="session__time">上周</span>
@@ -1014,7 +1100,7 @@
                     </svg>
                   </button>
                   <div class="workspace__sessions" id="ws-dsh-sidebar-share">
-                    <div class="session">
+                    <div class="session" data-session="s9">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">侧栏分栏与分享</span>
                         <span class="session__time">昨天</span>
@@ -1025,7 +1111,7 @@
                         </svg>
                       </button>
                     </div>
-                    <div class="session">
+                    <div class="session" data-session="s10">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">工作区白名单与来源</span>
                         <span class="session__time">周一</span>
@@ -1036,7 +1122,7 @@
                         </svg>
                       </button>
                     </div>
-                    <div class="session">
+                    <div class="session" data-session="s11">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">Caddy 门禁 401</span>
                         <span class="session__time">上周</span>
@@ -1067,7 +1153,7 @@
                     </svg>
                   </button>
                   <div class="workspace__sessions" id="ws-workspace">
-                    <div class="session">
+                    <div class="session" data-session="s12">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">部署脚本回填失败</span>
                         <span class="session__time">周一</span>
@@ -1078,7 +1164,7 @@
                         </svg>
                       </button>
                     </div>
-                    <div class="session">
+                    <div class="session" data-session="s13">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">EasyTier 路由冲突</span>
                         <span class="session__time">上周</span>
@@ -1089,7 +1175,7 @@
                         </svg>
                       </button>
                     </div>
-                    <div class="session">
+                    <div class="session" data-session="s14">
                       <div class="session__main" data-act="tab-chat" role="button" tabindex="0">
                         <span class="session__title">会话搜索与归档</span>
                         <span class="session__time">更早</span>
@@ -1104,7 +1190,7 @@
                 </section>
                 <div class="sessions__empty" hidden>无匹配会话</div>
               </div>
-              <div class="search-hint" role="status">输入关键词搜索会话</div>
+              <div class="search-hint" role="status">输入关键词搜索对话内容</div>
               <div class="session-menu" id="sessionMenu" role="menu" tabindex="-1" hidden>
                 <button type="button" role="menuitem" data-menu="rename">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1219,6 +1305,8 @@
       <h2>移动外壳原型</h2>
       <p>390 × 844。基线按 <code>lib/client.js</code> 的 SHELL_CSS / MobileBar 复刻；本轮已改触发按钮、新对话标题、右上角新建对话、新对话区鱼标与问候语、会话行 ⋯ 菜单（重命名 / 置顶 / 归档，苹果备忘录式分组：线性图标 + 内缩淡分割线）；抽屉改成按工作区分组（4 组，点标题折叠 / 展开，文件夹图标随折叠换开 / 合，当前会话所在组高亮，搜索时强制展开并显示「命中 / 总数」）；整页固定纯黑底、去掉分割线；移除底部三栏；输入条改成一整块圆角卡片（文字在上，右下两枚圆形按钮：描边「+」与主色「发送」，没有「深度思考 / 智能搜索」胶囊）。点左上角按钮开抽屉，点遮罩关抽屉；点搜索框会撑满页面，左上返回键回抽屉；插件页暂时用 <code>?tab=plugins</code> 打开。</p>
 
+      <p>搜索改成了搜对话内容：输入停 250ms 才发请求，等待期铺三行骨架屏，回来后标题命中在前、纯内容命中在后，内容命中在标题下补一行片段（12px 次级色、单行省略，对齐 DSH 的 <code>searchResultSnippet</code>）。正文来自页面底部的 <code>LOGS</code> 假数据，片段按 240 码位裁剪，与 <code>dsh-session-query-sqlite</code> 的 <code>makeSnippet</code> 同一套规则。</p>
+
       <h3>还没解决</h3>
       <ul class="issues">
         <li>
@@ -1237,6 +1325,10 @@
           <b>④ 分组是宿主已有能力</b>
           <span>已核对 <code>dsh-client-ui-workspace</code>：工作区行是 <code>role="treeitem"</code> + <code>aria-expanded</code>，折叠时换 FolderOpen / FolderClose 图标；这版按它复刻。插件若要改行内样式或交互，原生行没有稳定类名，仍需自建列表。</span>
         </li>
+        <li>
+          <b>⑤ 搜索结果还是假数据</b>
+          <span>正文来自底部的 <code>LOGS</code>；真机是 <code>sessions.search(query, signal)</code> 打到 Host 的 FTS5（<code>dsh-session-query-sqlite</code>）。真接时要补这版没做的三件事：冷会话读取的失败分支、结果上限（<code>hasMore</code> → 「仅显示前 N 条」）、以及同名会话取后端 snippet 的去重规则。</span>
+        </li>
       </ul>
 
       <h3>改这里</h3>
@@ -1246,6 +1338,9 @@
         <li>右上角新建对话：<code>.topbar__btn--new</code></li>
         <li>新对话区：<code>.empty__logo</code> / <code>.empty__title</code></li>
         <li>抽屉搜索 / 返回：<code>.search-row</code>、<code>.search-back</code>、<code>[data-search="true"]</code></li>
+        <li>搜索加载态：<code>.search-loading</code>、<code>.skeleton</code>、<code>[data-pending="true"]</code></li>
+        <li>内容命中片段：<code>.session__snippet</code>、<code>[data-snippet="true"]</code>、脚本里的 <code>LOGS</code></li>
+        <li>防抖 / 模拟耗时 / 片段长度：<code>DEBOUNCE_MS</code>、<code>LATENCY_MS</code>、<code>SNIPPET_MAX</code></li>
         <li>工作区 / 会话：<code>.workspace__head</code>、<code>[data-collapsed="true"]</code>、<code>.workspace__icon--open/--closed</code>、<code>.session</code></li>
         <li>会话操作菜单：<code>.session__more</code>、<code>.session-menu</code></li>
         <li>输入条：<code>.composer__bar</code>（整块卡片）、<code>.composer__row</code>（按钮行）、
@@ -1319,7 +1414,11 @@
         row.dataset.pinned = 'true';
         const workspace = row.closest('.workspace');
         const list = row.closest('.workspace__sessions');
-        if (list) list.prepend(row);
+        if (list) {
+          list.prepend(row);
+          // 排序基线要跟着挪，否则下次搜索结束会把置顶行还原回原位
+          reindex(list);
+        }
         if (workspace) setCollapsed(workspace, false);
         filterSessions();
         return;
@@ -1473,10 +1572,244 @@
     const initialCollapsed = new Map(
       workspaces.map((workspace) => [workspace, workspace.dataset.collapsed === 'true']),
     );
+    // 结果重排后要能还原原始行序（置顶会动 DOM，所以建表时记一遍）
+    const rowOrder = new Map();
+    document.querySelectorAll('.session').forEach((row, index) => rowOrder.set(row, index));
+
+    /* ------------------------------------------------------------ 假的会话正文
+       真机的正文由 Host 的 FTS5 索引提供（dsh-session-query-sqlite），按条消息切片；
+       这里用 data-session 对应的几段文字代替，只为看清「搜内容」长什么样。 */
+    const LOGS = {
+      s1: [
+        '抽屉宽度 84% 还是拉满？手机上拉满更顺手，返回键放左上角。',
+        '搜索框加 250ms 防抖，别每敲一个字都发一次请求；等待时先铺三行骨架屏。',
+        '骨架屏别太亮，和抽屉底色差两档就够了。',
+      ],
+      s2: [
+        '外壳只改壳，不要动宿主的会话列表组件；靠 [class*="_frame"] 改布局，宿主一升级就失配。',
+        '移动端只注入对话页，设置页和插件页都还没有入口，也没有返回。',
+      ],
+      s3: [
+        '配对码 60 秒自动刷新；扫到过期的码会停在 dsh web authentication required。',
+        '把门禁和令牌拼成一条 combo 链接，扫码一次就能进，不用再手动刷新。',
+      ],
+      s4: [
+        '令牌文件权限 0600，重启不影响已经打开的页面。',
+        '文件损坏时重新生成，别把控制面卡死在那一步。',
+      ],
+      s5: [
+        '遮罩用半透明黑，点击关闭；抽屉本体还缺 ESC 和焦点管理。',
+        '抽屉打开时别让下面的页面跟着滚动。',
+      ],
+      s6: [
+        '用 iframe 直接嵌站点，比截图方案实时。',
+        '跨站 cookie 是 SameSite=Strict，第一跳一定会掉 Cookie。',
+      ],
+      s7: [
+        '截图走 CDP 的 Page.captureScreenshot，别用系统级截屏。',
+        '无头 Chrome 复现了跨站跳转丢 Cookie 的问题，先种门禁再同源跳转。',
+      ],
+      s8: [
+        '抽屉里的预览按 390 宽等比缩放，超出部分双指捏合。',
+        '缩放的锚点要跟手指，不然拖起来会飘。',
+      ],
+      s9: [
+        '把右侧栏的布局跨会话共享，切会话不掉分栏。',
+        '分享出去的链接只读，别把工作区路径带出去。',
+      ],
+      s10: [
+        '白名单按工作区路径比对，来源不明的请求直接 403。',
+        '路径要 realpath 之后再比，软链会绕过白名单。',
+      ],
+      s11: [
+        'Caddy 的 handle /pair 先种门禁 Cookie，再返回同源页面跳转。',
+        '跨站发起的顶层导航不带 SameSite=Strict 的 Cookie，所以第一跳必 401。',
+      ],
+      s12: [
+        'install.sh 回填域名时拿不到 IP，脚本直接退出。',
+        '把回填放到第一段执行，别等服务都起来了才发现。',
+      ],
+      s13: [
+        'EasyTier 的虚拟网段和公司 VPN 撞了，改 10.144.0.0/16。',
+        '冲突时路由表里会出现两条同目的地，优先级高的那条不走隧道。',
+      ],
+      s14: [
+        '归档的会话默认不出现，搜索时要跟着当前筛选走。',
+        '标题命中和历史命中的排序不一样，本地命中排在前面。',
+      ],
+    };
+
+    const SNIPPET_MAX = 240; // = SESSION_SEARCH_SNIPPET_MAX_CODE_POINTS
+    const DEBOUNCE_MS = 250; // = dsh-client-ui-workspace 的 SEARCH_DEBOUNCE_MS
+    const LATENCY_MS = 520; // 模拟 Host 侧检索耗时（FTS5 + 冷会话读取）
+
+    let debounceTimer = 0;
+    let searchTimer = 0;
+    let searchSeq = 0;
+
+    function cancelSearch() {
+      window.clearTimeout(debounceTimer);
+      window.clearTimeout(searchTimer);
+      debounceTimer = 0;
+      searchTimer = 0;
+      searchSeq += 1;
+    }
+
+    // 照 dsh-session-query-sqlite 的 makeSnippet：空白归一、按 240 码位裁剪、两端省略号
+    function snippetOf(text, query) {
+      const clean = text.replace(/\s+/g, ' ').trim();
+      const characters = Array.from(clean);
+      if (characters.length <= SNIPPET_MAX) return clean;
+      const hit = clean.toLowerCase().indexOf(query);
+      const matchedIndex = hit < 0 ? 0 : Array.from(clean.slice(0, hit)).length;
+      let start = Math.max(0, matchedIndex - Math.floor(SNIPPET_MAX / 3));
+      const prefix = start > 0 ? '…' : '';
+      const length = Math.max(1, SNIPPET_MAX - prefix.length - 1);
+      if (matchedIndex >= start + length) start = Math.max(0, matchedIndex - length + 1);
+      const end = Math.min(characters.length, start + length);
+      const suffix = end < characters.length ? '…' : '';
+      return `${prefix}${characters.slice(start, end).join('')}${suffix}`;
+    }
+
+    // 该会话里第一条命中正文的片段；没有命中返回空串
+    function matchOf(row, query) {
+      const logs = LOGS[row.dataset.session] ?? [];
+      const line = logs.find((item) => item.toLowerCase().includes(query));
+      return line ? snippetOf(line, query) : '';
+    }
+
+    function setSnippet(row, text) {
+      const main = row.querySelector('.session__main');
+      if (!main) return;
+      let snippet = main.querySelector('.session__snippet');
+      if (!text) {
+        if (snippet) snippet.remove();
+        delete row.dataset.snippet;
+        return;
+      }
+      if (!snippet) {
+        snippet = document.createElement('span');
+        snippet.className = 'session__snippet';
+        main.append(snippet);
+      }
+      snippet.textContent = text;
+      row.dataset.snippet = 'true';
+    }
+
+    function setHeadsDisabled(disabled) {
+      workspaces.forEach((workspace) => {
+        const head = workspace.querySelector('.workspace__head');
+        if (disabled) head?.setAttribute('aria-disabled', 'true');
+        else head?.removeAttribute('aria-disabled');
+      });
+    }
+
+    function sortRows(list, compare) {
+      [...list.querySelectorAll('.session')].sort(compare).forEach((row) => list.append(row));
+    }
+
+    // 置顶/归档动过 DOM 之后，把该组的行序基线刷新一遍
+    function reindex(list) {
+      [...list.querySelectorAll('.session')].forEach((row, index) => rowOrder.set(row, index));
+    }
 
     function setCollapsed(workspace, collapsed) {
       workspace.dataset.collapsed = String(collapsed);
       workspace.querySelector('.workspace__head')?.setAttribute('aria-expanded', String(!collapsed));
+    }
+
+    // 非搜索态：还原行序、去掉片段、把组计数写回总数
+    function applyIdle() {
+      device.dataset.pending = 'false';
+      device.dataset.query = 'false';
+      setHeadsDisabled(false);
+      let total = 0;
+      workspaces.forEach((workspace) => {
+        const list = workspace.querySelector('.workspace__sessions');
+        if (!list) return;
+        workspace.hidden = false;
+        list.querySelectorAll('.session').forEach((row) => {
+          row.hidden = false;
+          delete row.dataset.rank;
+          setSnippet(row, '');
+        });
+        sortRows(list, (a, b) => rowOrder.get(a) - rowOrder.get(b));
+        const rows = list.querySelectorAll('.session');
+        const count = workspace.querySelector('.workspace__count');
+        if (count) count.textContent = String(rows.length);
+        total += rows.length;
+      });
+      emptyState.textContent = '暂无会话';
+      emptyState.hidden = total !== 0;
+    }
+
+    // 出结果：标题命中在前、纯内容命中在后（DSH 同样是本地命中优先）
+    function showResults(query) {
+      device.dataset.pending = 'false';
+      device.dataset.query = 'true';
+      let total = 0;
+      workspaces.forEach((workspace) => {
+        const list = workspace.querySelector('.workspace__sessions');
+        if (!list) return;
+        const rows = [...list.querySelectorAll('.session')];
+        let shown = 0;
+        rows.forEach((row) => {
+          const title = row.querySelector('.session__title')?.textContent.toLowerCase() ?? '';
+          const snippet = matchOf(row, query);
+          const titleHit = title.includes(query);
+          const match = titleHit || snippet !== '';
+          row.hidden = !match;
+          row.dataset.rank = titleHit ? '0' : match ? '1' : '2';
+          setSnippet(row, match ? snippet : '');
+          if (match) shown += 1;
+        });
+        sortRows(
+          list,
+          (a, b) => Number(a.dataset.rank) - Number(b.dataset.rank) || rowOrder.get(a) - rowOrder.get(b),
+        );
+        const count = workspace.querySelector('.workspace__count');
+        if (count) count.textContent = `${shown}/${rows.length}`;
+        workspace.hidden = shown === 0;
+        total += shown;
+      });
+      emptyState.textContent = '无匹配会话';
+      emptyState.hidden = total !== 0;
+    }
+
+    // 结构变化（改名 / 置顶 / 归档）后重算当前结果，不再走防抖
+    function filterSessions() {
+      if (device.dataset.pending === 'true') return;
+      const query = searchInput.value.trim().toLowerCase();
+      if (query === '') {
+        applyIdle();
+        return;
+      }
+      if (device.dataset.query !== 'true') return;
+      showResults(query);
+    }
+
+    // 输入 → 防抖 → 骨架屏 → 结果
+    function onQueryChange(immediate = false) {
+      closeMenu();
+      cancelSearch();
+      const query = searchInput.value.trim().toLowerCase();
+      if (query === '') {
+        applyIdle();
+        return;
+      }
+      device.dataset.pending = 'true';
+      device.dataset.query = 'false';
+      setHeadsDisabled(true);
+      const seq = searchSeq;
+      const run = () => {
+        if (seq !== searchSeq) return;
+        searchTimer = window.setTimeout(() => {
+          if (seq !== searchSeq) return;
+          showResults(query);
+        }, LATENCY_MS);
+      };
+      if (immediate) run();
+      else debounceTimer = window.setTimeout(run, DEBOUNCE_MS);
     }
 
     function resetWorkspaces() {
@@ -1490,9 +1823,11 @@
       const changed = state.search || searchInput.value !== '';
       state.search = false;
       searchInput.value = '';
+      cancelSearch();
+      device.dataset.pending = 'false';
       if (!changed) return;
       searchInput.blur();
-      filterSessions();
+      applyIdle();
     }
 
     function enterSearch() {
@@ -1513,39 +1848,7 @@
 
     searchInput.addEventListener('focus', enterSearch);
     document.querySelector('.drawer__search').addEventListener('click', enterSearch);
-
-    function filterSessions() {
-      const query = searchInput.value.trim().toLowerCase();
-      const searching = query !== '';
-      device.dataset.query = String(searching);
-      workspaces.forEach((workspace) => {
-        const head = workspace.querySelector('.workspace__head');
-        if (searching) head?.setAttribute('aria-disabled', 'true');
-        else head?.removeAttribute('aria-disabled');
-      });
-      let total = 0;
-      workspaces.forEach((workspace) => {
-        const rows = [...workspace.querySelectorAll('.session')];
-        let shown = 0;
-        rows.forEach((row) => {
-          const title = row.querySelector('.session__title')?.textContent.toLowerCase() ?? '';
-          const match = !searching || title.includes(query);
-          row.hidden = !match;
-          if (match) shown += 1;
-        });
-        const count = workspace.querySelector('.workspace__count');
-        if (count) count.textContent = searching ? `${shown}/${rows.length}` : String(rows.length);
-        workspace.hidden = searching && shown === 0;
-        total += shown;
-      });
-      emptyState.textContent = searching ? '无匹配会话' : '暂无会话';
-      emptyState.hidden = total !== 0;
-    }
-
-    searchInput.addEventListener('input', () => {
-      closeMenu();
-      filterSessions();
-    });
+    searchInput.addEventListener('input', () => onQueryChange());
 
     document.querySelector('.sessions').addEventListener('scroll', closeMenu, { passive: true });
 
@@ -1553,8 +1856,17 @@
     workspaces.forEach((workspace) => {
       setCollapsed(workspace, workspace.dataset.collapsed === 'true');
     });
-    filterSessions();
+    applyIdle();
     render();
+
+    // ?q=关键词：跳过防抖直接进检索（骨架屏照常走一遍），方便截图与联调
+    if (params.has('q')) {
+      searchInput.value = params.get('q') ?? '';
+      state.search = true;
+      state.drawer = true;
+      render();
+      onQueryChange(true);
+    }
   
   </script>
 </body>
