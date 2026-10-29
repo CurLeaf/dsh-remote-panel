@@ -526,3 +526,34 @@ handler({ req: { headers: {'x-forwarded-proto': 'https'} } }) -> https://10.140.
 
 **设置面板**：弹窗宽度 `calc(100vw - 16px)`（342 → 374），内容区 `overflow-y:auto` + 安全区；
 「远程访问」页在 390 下完整可读（五盏灯含证书、二维码、https 配对链接）。
+
+## 2026-10-29 · 修「Edge/Chrome 装不成 App」
+
+现象：手机 Edge 里「添加到手机 / 安装应用」失败。
+
+诊断（CDP `Page.getInstallabilityErrors` + Caddy 访问日志）：
+
+```
+manifest url: https://10.140.140.223:8710/remote-panel/app/manifest.webmanifest
+installability: [ "manifest-parsing-or-network-error", "start-url-not-valid" ]
+```
+
+访问日志里 manifest 请求**没有 Cookie 头**，全被门禁回 401 —— 按规范，浏览器抓 manifest 是
+`credentials: omit`，不会带 Cookie。于是清单拿不到，安装自然失败。
+
+修法：让 Caddy 在门禁**之前**直接发静态文件（不再经过 DSH 与门禁）：
+
+```
+handle_path /remote-panel/app/* {
+    root * ~/.dsh/remote-panel-app
+    @manifest path *.webmanifest
+    header @manifest Content-Type application/manifest+json
+    file_server
+}
+```
+
+资源由插件启动时同步到 `~/.dsh/remote-panel-app`（manifest 与图标来自包内，`ca.crt` 取本地根证书），
+部署模板也加了同一段（占位符 `@@APP_DIR@@`）。
+
+修完复测：manifest 200（`application/manifest+json`，免 Cookie）、图标 200、`installability: []`（无错误）。
+副作用（有意为之）：根证书现在也能免 Cookie 下载，新设备配对前就能先装证书。

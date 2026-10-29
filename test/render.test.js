@@ -171,3 +171,16 @@ test('默认仍是明文 HTTP', () => {
 	assert.doesNotMatch(caddy, /tls internal/)
 	assert.equal(out.summary.urls.mesh, 'http://10.140.140.223:8710/')
 })
+
+test('PWA 资源在门禁之前由 Caddy 直接发（manifest 抓取不带 Cookie）', () => {
+	const out = renderDeploy(base)
+	const caddy = out.files['~/.config/caddy/Caddyfile']
+	assert.match(caddy, /handle_path \/remote-panel\/app\/\* \{/)
+	assert.match(caddy, /root \* /)
+	assert.ok(caddy.includes('/home/yxw/.dsh/remote-panel-app'), '应指向 home 下的资源目录')
+	assert.match(caddy, /Content-Type application\/manifest\+json/)
+	// 必须排在门禁之前
+	const appAt = caddy.indexOf('handle_path /remote-panel/app/')
+	const gateAt = caddy.indexOf('@key query k=')
+	assert.ok(appAt !== -1 && appAt < gateAt, 'PWA 资源要在口令门禁之前')
+})

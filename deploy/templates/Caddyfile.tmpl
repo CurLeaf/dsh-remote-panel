@@ -33,6 +33,16 @@
 			respond "ok" 200
 		}
 
+		# PWA 资源必须免 Cookie：浏览器抓 manifest 时按规范不带凭据，走门禁会 401，
+		# Chrome/Edge 会报 manifest-parsing-or-network-error，于是「安装应用」失败。
+		# 文件由插件启动时同步到 @@APP_DIR@@（manifest / 图标 / 根证书）。
+		handle_path /remote-panel/app/* {
+			root * @@APP_DIR@@
+			@manifest path *.webmanifest
+			header @manifest Content-Type application/manifest+json
+			file_server
+		}
+
 		# 第二层：口令门禁
 		@key query k=@@ACCESS_KEY@@
 		handle @key {

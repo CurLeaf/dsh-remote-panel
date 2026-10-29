@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { APP_PREFIX, MANIFEST_PATH, appHeadInjections, appManifest, requestScheme, tlsStatus, withAppViewport } from '../lib/index.js'
+import { APP_PREFIX, MANIFEST_PATH, appHeadInjections, appManifest, requestScheme, syncAppAssets, tlsStatus, withAppViewport } from '../lib/index.js'
 
 test('head 注入：主题色、iOS 独立窗口、桌面图标；不重复声明 manifest', () => {
 	const rows = appHeadInjections()
@@ -60,4 +60,23 @@ test('tlsStatus：只报 enabled + 最近一次 /probe 的缓存，不发起探�
 	assert.deepEqual(tlsStatus(true, { expiresAt: null, hoursLeft: null, reason: 'TLS 握手失败：timeout' }), {
 		enabled: true,
 	})
+})
+
+test('syncAppAssets 把清单与图标落到 Caddy 目录，且幂等', async () => {
+	const { mkdtempSync, rmSync, readFileSync, statSync } = await import('node:fs')
+	const { tmpdir } = await import('node:os')
+	const { join } = await import('node:path')
+	const dir = mkdtempSync(join(tmpdir(), 'panel-pwa-'))
+	try {
+		syncAppAssets(dir)
+		const manifest = JSON.parse(readFileSync(join(dir, 'manifest.webmanifest'), 'utf8'))
+		assert.equal(manifest.short_name, 'DSH')
+		assert.ok(statSync(join(dir, 'icon-192.png')).size > 0)
+		const before = statSync(join(dir, 'manifest.webmanifest')).mtimeMs
+		await new Promise((r) => setTimeout(r, 20))
+		syncAppAssets(dir)
+		assert.equal(statSync(join(dir, 'manifest.webmanifest')).mtimeMs, before, '内容未变时不应重写')
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
 })
