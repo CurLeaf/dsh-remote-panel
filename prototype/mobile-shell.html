@@ -559,7 +559,7 @@
     font-size: 12px;
     color: var(--muted);
   }
-  /* 行数由脚本按可用高度算：loading 态和结果态占据同一个列表区 */
+  /* 固定 3 行；容器仍撑满列表区，所以 loading 与结果两态的外框高度一致 */
   .search-loading__rows {
     flex: 1;
     min-height: 0;
@@ -577,11 +577,11 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 7px;
+    gap: 8px;
   }
   .skeleton__bar {
     display: block;
-    height: 9px;
+    height: 12px;
     border-radius: 999px;
     background: linear-gradient(100deg, #242427 28%, #33333a 50%, #242427 72%);
     background-size: 220% 100%;
@@ -590,7 +590,7 @@
     animation-delay: var(--skeleton-delay, 0s);
   }
   .skeleton__bar--title { width: 62%; }
-  .skeleton__bar--meta { width: 88%; height: 8px; }
+  .skeleton__bar--meta { width: 88%; height: 10px; }
   @keyframes skeleton-shimmer {
     from { background-position: 170% 0; }
     to { background-position: -70% 0; }
@@ -954,10 +954,14 @@
                   <input type="search" placeholder="搜索对话内容..." aria-label="搜索对话内容" enterkeyhint="search" />
                 </label>
               </div>
-              <!-- 历史检索等待态：骨架行由脚本按可用高度铺满，行高与结果行一致 -->
+              <!-- 历史检索等待态：固定 3 行骨架，行高与结果行一致（55px） -->
               <div class="search-loading" role="status" aria-live="polite">
                 <div class="search-loading__label">正在搜索会话历史…</div>
-                <div class="search-loading__rows" aria-hidden="true"></div>
+                <div class="search-loading__rows" aria-hidden="true">
+                  <div class="skeleton"><i class="skeleton__bar skeleton__bar--title"></i><i class="skeleton__bar skeleton__bar--meta"></i></div>
+                  <div class="skeleton" style="--skeleton-delay: .14s"><i class="skeleton__bar skeleton__bar--title" style="width: 48%"></i><i class="skeleton__bar skeleton__bar--meta"></i></div>
+                  <div class="skeleton" style="--skeleton-delay: .28s"><i class="skeleton__bar skeleton__bar--title" style="width: 54%"></i><i class="skeleton__bar skeleton__bar--meta"></i></div>
+                </div>
               </div>
               <div class="sessions">
                 <section class="workspace" data-workspace="dsh-remote-panel" data-collapsed="false" data-current="true">
@@ -1344,7 +1348,7 @@
         <li>右上角新建对话：<code>.topbar__btn--new</code></li>
         <li>新对话区：<code>.empty__logo</code> / <code>.empty__title</code></li>
         <li>抽屉搜索 / 返回：<code>.search-row</code>、<code>.search-back</code>、<code>[data-search="true"]</code></li>
-        <li>搜索加载态：<code>.search-loading</code>、<code>.skeleton</code>、<code>[data-pending="true"]</code>（行高 55px 与结果行一致，行数按列表区高度铺满）</li>
+        <li>搜索加载态：<code>.search-loading</code>、<code>.skeleton</code>、<code>[data-pending="true"]</code>（固定 3 行，行高 55px 与结果行一致）</li>
         <li>内容命中片段：<code>.session__snippet</code>、<code>[data-snippet="true"]</code>、脚本里的 <code>LOGS</code></li>
         <li>防抖 / 模拟耗时 / 片段长度：<code>DEBOUNCE_MS</code>、<code>LATENCY_MS</code>、<code>SNIPPET_MAX</code></li>
         <li>工作区 / 会话：<code>.workspace__head</code>、<code>[data-collapsed="true"]</code>、<code>.workspace__icon--open/--closed</code>、<code>.session</code></li>
@@ -1649,33 +1653,6 @@
     const DEBOUNCE_MS = 250; // = dsh-client-ui-workspace 的 SEARCH_DEBOUNCE_MS
     const LATENCY_MS = 520; // 模拟 Host 侧检索耗时（FTS5 + 冷会话读取）
 
-    // 骨架行与结果行等高（见 .skeleton 的 height），行数按列表区可用高度铺满，
-    // 这样 loading 态和结果态占的是同一块屏幕，结果回来不会跳。
-    const SKELETON_ROW_HEIGHT = 55;
-    const SKELETON_GAP = 2;
-    const loadingRows = document.querySelector('.search-loading__rows');
-
-    function buildSkeleton() {
-      const available = loadingRows.clientHeight;
-      const count = Math.max(3, Math.min(16, Math.round((available + SKELETON_GAP) / (SKELETON_ROW_HEIGHT + SKELETON_GAP))));
-      if (loadingRows.childElementCount === count) return;
-      loadingRows.replaceChildren(
-        ...Array.from({ length: count }, (_, index) => {
-          const row = document.createElement('div');
-          row.className = 'skeleton';
-          row.setAttribute('aria-hidden', 'true');
-          row.style.setProperty('--skeleton-delay', `${(index % 3) * 0.14}s`);
-          const title = document.createElement('span');
-          title.className = 'skeleton__bar skeleton__bar--title';
-          title.style.width = `${52 + ((index * 11) % 20)}%`;
-          const meta = document.createElement('span');
-          meta.className = 'skeleton__bar skeleton__bar--meta';
-          row.append(title, meta);
-          return row;
-        }),
-      );
-    }
-
     let debounceTimer = 0;
     let searchTimer = 0;
     let searchSeq = 0;
@@ -1833,7 +1810,6 @@
       device.dataset.pending = 'true';
       device.dataset.query = 'false';
       setHeadsDisabled(true);
-      buildSkeleton();
       const seq = searchSeq;
       const run = () => {
         if (seq !== searchSeq) return;
