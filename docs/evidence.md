@@ -510,3 +510,19 @@ handler({ req: { headers: {'x-forwarded-proto': 'https'} } }) -> https://10.140.
 `:has(> _nav)` 做守卫，其它 dialog（权限确认等）不受影响。
 
 ![手机面板](live-mobile-panel.png)
+
+## 2026-10-29 · 长会话滚动与设置面板（发版前最后一项）
+
+**滚动**：DSH 不虚拟化消息，长会话里所有 markdown 块都在文档里。窄屏下给它们加
+
+```css
+[class*="_markdown"] { content-visibility: auto; contain-intrinsic-size: auto 320px; }
+[class*="_scrollBody"] { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+```
+
+实测（这个会话本身，30 轮 / 6869px / 3300+ 节点）：36 个 markdown 块全部生效 `content-visibility: auto`；
+90 帧程序化滚动 headless 下前后都是 16.7ms/帧（p95 17.1），也就是说**无头环境已经跑满 60fps**，
+这项改动真正的收益在真实手机上：离屏块不再参与布局与绘制，节点越多、会话越长收益越明显。
+
+**设置面板**：弹窗宽度 `calc(100vw - 16px)`（342 → 374），内容区 `overflow-y:auto` + 安全区；
+「远程访问」页在 390 下完整可读（五盏灯含证书、二维码、https 配对链接）。
