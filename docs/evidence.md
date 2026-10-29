@@ -557,3 +557,19 @@ handle_path /remote-panel/app/* {
 
 修完复测：manifest 200（`application/manifest+json`，免 Cookie）、图标 200、`installability: []`（无错误）。
 副作用（有意为之）：根证书现在也能免 Cookie 下载，新设备配对前就能先装证书。
+
+## 2026-10-29 · WebView 壳 APK（绕过 WebAPK）
+
+国行 Android 没有 GMS，Chromium 的「安装应用」走 WebAPK minting，必然失败；
+TWA 又要域名做 Digital Asset Links，我们只有内网 IP。于是自己做壳：
+
+| 项 | 做法 |
+|---|---|
+| 工程 | `android/`（纯 aapt2 + javac + d8 + apksigner，不用 Gradle，产物 21KB） |
+| 启动页 | `/remote-panel/app/go.html`，插件每次启动重写：写入当次令牌 → `/pair?k=&token=` → 首页 |
+| 证书 | `network_security_config` 把 `user` 加入信任锚，否则 WebView 不认用户凭据里的 Caddy CA |
+| 全屏 | 隐藏状态栏/导航栏（API30+ 用 WindowInsetsController），返回键先 `goBack()` |
+| 分发 | APK 放 `~/.dsh/remote-panel-app/dsh.apk`，Caddy 免 Cookie 直发；手机访问 `/remote-panel/app/dsh.apk` |
+
+实测：`aapt2 dump badging` 显示包名 `dev.curleaf.dshpocket`、label `DSH`、versionCode 1；
+`apksigner verify` 通过（debug keystore，CN=DSH Pocket）；APK 21,231 字节，sha256 `4ff6dd07…`。

@@ -64,6 +64,22 @@ Caddy 的 `pki/authorities/local/root.crt`）。
 - Android：设置 → 安全 → 加密与凭据 → 安装证书 → CA 证书。
 - iOS：下载后到 设置 → 通用 → 关于本机 → 证书信任设置 里打开信任。
 
+## 手机 App（WebView 壳）
+
+PWA「安装应用」在国行 Android 上装不成：WebAPK 打包依赖 Google Play 服务，且打包服务器要能从公网
+访问源站（我们是内网 IP）。所以仓库里带了一个极简 WebView 壳：
+
+```bash
+./android/build.sh            # 需要 ANDROID_HOME（build-tools 34 + platform 34）与 JDK 17
+# 产物：android/dsh-pocket.apk
+```
+
+- 启动地址是 `/remote-panel/app/go.html`：插件每次启动时重写这一页，写入当前令牌，
+  先种门禁 Cookie 再跳首页，所以壳里不用登录；
+- `network_security_config` 显式信任 **user CA**，否则 WebView 不认装在用户凭据里的 Caddy 根证书；
+- 装好后的 APK 放在 `~/.dsh/remote-panel-app/dsh.apk`，手机直接访问
+  `https://<ip>:8710/remote-panel/app/dsh.apk` 下载安装即可。
+
 ## 手机 App 化
 
 - **iPhone / iPad**：浏览器「分享 → 添加到主屏幕」，从桌面图标打开就是无地址栏的全屏。

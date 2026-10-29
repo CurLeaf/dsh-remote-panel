@@ -3,3 +3,7 @@ node_modules/
 .DS_Store
 .tmp/
 coverage/
+
+# 构建产物
+android/out/
+android/dsh-pocket.apk
