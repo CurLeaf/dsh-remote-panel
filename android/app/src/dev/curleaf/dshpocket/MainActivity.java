@@ -21,7 +21,9 @@ import android.webkit.WebViewClient;
  * 里面带着当前进程的令牌，会先种门禁 Cookie 再跳到带令牌的首页。
  */
 public class MainActivity extends Activity {
-	private static final String START = "https://10.140.140.223:8710/remote-panel/app/go.html";
+	private static final String SERVER = "https://10.140.140.223:8710";
+	private static final String SERVER_HOST = "10.140.140.223";
+	private static final String START = SERVER + "/remote-panel/app/go.html";
 	private WebView web;
 
 	@Override
@@ -37,7 +39,34 @@ public class MainActivity extends Activity {
 		settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
 		CookieManager.getInstance().setAcceptCookie(true);
 		CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
-		web.setWebViewClient(new WebViewClient());
+		web.setWebViewClient(new WebViewClient() {
+			@Override
+			public void onReceivedSslError(WebView view, android.webkit.SslErrorHandler handler, android.net.http.SslError error) {
+				// 只对「我们自己的站点」放行：证书是 Caddy 内部 CA 签的，
+				// 有的 ROM 的 WebView 不认用户凭据里的根证书，硬拦会直接白屏。
+				// 注意要比对 URL 里的 host（error.getUrl() 是完整 URL，不能直接 startsWith 主机名）。
+				String url = error.getUrl() == null ? "" : error.getUrl();
+				String host = "";
+				try {
+					host = new java.net.URI(url).getHost();
+				} catch (Exception ignored) {
+					// 解析不了就当外站处理
+				}
+				if (SERVER_HOST.equals(host)) {
+					handler.proceed();
+					return;
+				}
+				handler.cancel();
+				showError("证书不受信任：" + host + "\n" + url);
+			}
+
+			@Override
+			public void onReceivedError(WebView view, android.webkit.WebResourceRequest request, android.webkit.WebResourceError error) {
+				if (request != null && request.isForMainFrame()) {
+					showError("打不开 " + request.getUrl() + "\n" + error.getDescription());
+				}
+			}
+		});
 		setContentView(web);
 		hideSystemBars();
 		web.loadUrl(START);
@@ -65,6 +94,16 @@ public class MainActivity extends Activity {
 			web = null;
 		}
 		super.onDestroy();
+	}
+
+	/** 出问题时不要留白屏：把错误显示在页面上，方便自查。 */
+	private void showError(String message) {
+		if (web == null) return;
+		String html = "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
+			+ "<body style='background:#000;color:#ddd;font:14px system-ui;padding:24px;line-height:1.6'>"
+			+ "<h3 style='color:#f2b8b5'>DSH 打不开</h3><pre style='white-space:pre-wrap'>"
+			+ message.replace("&", "&amp;").replace("<", "&lt;") + "</pre></body>";
+		web.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
 	}
 
 	private void hideSystemBars() {
