@@ -167,7 +167,8 @@ for _ in $(seq 1 30); do
 done
 ss -ltn 2>/dev/null | grep -q ":${PROXY_PORT} " || die "反代未监听 :${PROXY_PORT}"
 
-health="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PROXY_PORT}/healthz" || true)"
+# TLS 时本地没有信任链，用 -k 只探活，不校验证书
+health="$(curl -sk -o /dev/null -w '%{http_code}' "@@SCHEME@@://127.0.0.1:${PROXY_PORT}/healthz" || true)"
 [ "$health" = "200" ] || die "healthz 未返回 200（实际 ${health}）"
 
 PAYLOAD="$(printf '{"version":"%s","port":%s,"ip":"%s","upstream":%s,"health":"%s","key":"%s"}' \
@@ -177,8 +178,8 @@ cat <<EOF
 
 部署完成。
 
-  手机 / 平板： http://${VIRTUAL_IP}:${PROXY_PORT}/
-  家里局域网：  http://<本机局域网IP>:${PROXY_PORT}/
+  手机 / 平板： @@SCHEME@@://${VIRTUAL_IP}:${PROXY_PORT}/
+  家里局域网：  @@SCHEME@@://<本机局域网IP>:${PROXY_PORT}/
 
 回填码（复制到「远程访问」面板）：
 DSH_REMOTE_OK ${PAYLOAD}

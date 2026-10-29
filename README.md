@@ -47,6 +47,32 @@ dsh plugin --profile web add dsh-remote-panel
 
 ---
 
+## 可选 HTTPS（内部 CA）
+
+默认是明文 HTTP。要装成 Android 独立应用，勾上向导里的「启用 HTTPS」重新部署即可，其余不变：
+
+- Caddyfile 会变成 `10.140.140.223:8710 { tls internal … }`，`auto_https` 从 `off` 改成
+  `disable_redirects`——**`off` 会把证书自动化一起关掉**，`tls internal` 就签不出证书（实测握手
+  `no certificate available`）。
+- 站点地址必须带 IP：内部 CA 按名字签，空 host 的 `:8710` 签不出来；签出来的是
+  `IP Address:10.140.140.223` 的证书。
+- 配对二维码/链接、安装脚本打印的地址、面板里的地址都会跟着变成 `https://`。
+
+手机第一次要信任根证书：面板「远程访问 → 手机全屏」里有 **下载根证书**（`/remote-panel/app/ca.crt`，就是
+Caddy 的 `pki/authorities/local/root.crt`）。
+
+- Android：设置 → 安全 → 加密与凭据 → 安装证书 → CA 证书。
+- iOS：下载后到 设置 → 通用 → 关于本机 → 证书信任设置 里打开信任。
+
+## 手机 App 化
+
+- **iPhone / iPad**：浏览器「分享 → 添加到主屏幕」，从桌面图标打开就是无地址栏的全屏。
+  （iOS 不认 manifest 的 display，靠注入的 `apple-mobile-web-app-capable` + `apple-touch-icon`。）
+- **Android**：真正「安装应用」需要 HTTPS；没有 HTTPS 时用 **设置 → 远程访问 → 手机全屏 → 进入全屏**
+  （Fullscreen API，隐藏浏览器 UI）。
+- 配套优化：`viewport-fit=cover` + 安全区（刘海 / Home 指示条）、`interactive-widget=resizes-content`
+  （键盘挤压布局而不是盖住输入条）、`theme-color`（深浅两套）、`overscroll-behavior: none`（无下拉刷新）。
+
 ## 安全模型
 
 三层，从外到内：
@@ -70,7 +96,7 @@ dsh plugin --profile web add dsh-remote-panel
 | 现象 | 含义 | 处置 |
 |---|---|---|
 | 连接被拒绝 | 网络层或 Caddy 没起 | `systemctl --user status dsh-proxy`、`easytier-cli peer` |
-| `403 source not allowed` | 来源不在白名单 | 面板「来源白名单」加设备，或在家连 Wi-Fi |
+| `403 source not allowed` | 来源不在白名单 | 面板「来源白名单」加设备；若手机组网地址变过（.2 → .3），确认名单里有组网网段 `10.x.0.0/24` |
 | `401 access key required` | 缺门禁 Cookie | 用 `?k=` 那条链接重开一次 |
 | `401 dsh web authentication required` | 已到 DSH，缺令牌 | 用 `?token=` 那条链接重开一次 |
 | `/healthz` 返回 200 | 链路本身健康 | 问题在认证层，不在网络层 |

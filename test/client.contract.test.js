@@ -81,7 +81,7 @@ test('apply 注册设置分区与移动端外壳插槽', () => {
 	assert.equal(section.registration.label(), '远程访问')
 	assert.equal(typeof section.component, 'function')
 
-	assert.equal(byName.get('shell.overlay').registration.id, 'remote-panel.mobile-bar')
+	assert.equal(byName.get('shell.overlay').registration.id, 'remote-panel.new-chat')
 	assert.equal(byName.get('conversation.header.leading').registration.id, 'remote-panel.hamburger')
 })
 
@@ -108,6 +108,7 @@ test('每个面板组件浅渲染都不抛错', () => {
 		PairCard: {},
 		AccessCard: {},
 		StaleBanner: {},
+		AppCard: {},
 	}
 	for (const [name, component] of Object.entries(exports.components)) {
 		assert.doesNotThrow(() => component(props[name] ?? {}), `${name} 渲染抛错`)

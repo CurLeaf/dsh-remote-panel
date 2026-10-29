@@ -49,6 +49,12 @@ test('findToken 失败时返回 undefined 而不抛', async () => {
 	assert.equal(token, undefined)
 })
 
+test('pairingUrls 支持 https（TLS 部署时配对链接不能落回明文）', () => {
+	const urls = pairingUrls({ ip: '10.140.140.223', port: 8710, accessKey: 'k'.repeat(24), token: 't'.repeat(24), scheme: 'https' })
+	assert.ok(urls.gate.startsWith('https://'))
+	assert.ok(urls.combo.startsWith('https://'))
+})
+
 test('pairingUrls 顺序与内容', () => {
 	const urls = pairingUrls({ ip: '10.140.140.223', port: 8710, accessKey: 'k'.repeat(24), token: 't'.repeat(24) })
 	assert.equal(urls.gate, `http://10.140.140.223:8710/?k=${'k'.repeat(24)}`)

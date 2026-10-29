@@ -2,10 +2,12 @@
 # 生成者：dsh-remote-panel @@VERSION@@
 {
 	# admin API 保持默认（仅本机 2019）：白名单热重载依赖 `caddy reload`
-	auto_https off
+	# 走 TLS 时不能用 off（会把证书自动化一起关掉），改成 disable_redirects
+	auto_https @@AUTO_HTTPS@@
 }
 
-:@@PORT@@ {
+@@SITE_ADDR@@ {
+@@TLS_LINE@@
 	# 访问日志进 journal，供面板「最近拒绝」使用
 	log {
 		output stderr
@@ -14,7 +16,9 @@
 	}
 
 	# 第一层：来源白名单
-	@lan remote_ip 127.0.0.1 ::1 @@LAN_CIDR@@ @@VIRTUAL_IP@@
+	# 最后一条是组网网段：EasyTier 成员每次重连可能换地址（.2 → .3），
+	# 只钉单个 IP 会反复 403；按网段放行，边界仍由「入网需要网络密钥」保证。
+	@lan remote_ip 127.0.0.1 ::1 @@LAN_CIDR@@ @@VIRTUAL_IP@@ @@MESH_CIDR@@
 	handle @lan {
 		# 配对入口：路径匹配（可靠），返回同源页面做一次「同站跳转」。
 		# 跨站导航不会带 SameSite=Strict 的 DSH Cookie，必须由同源页面自己发起。

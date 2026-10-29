@@ -207,3 +207,306 @@ Panel → 六张卡全部走一遍渲染。
 修法：配对链接改走 `/pair` 路径，Caddy 先种门禁 Cookie 并返回一个**同源小页面**，
 由该页面 `location.replace('/?token=…')` 再跳一次——这一次是同站发起，Cookie 会被带上。
 实测：跨站入口直接落到 Harness 界面，无需手动回车。
+
+## 2026-10-29 · 手机外壳按原型重做（390 真实视口）
+
+`lib/client.js` 之前只做「侧栏浮层化 + 底栏」。这次按移动外壳原型稿（已移除）重写
+`SHELL_CSS`，并用同一个进程里的 HMR 热更 + CDP 真机口径验收（**不用重启 dsh-web**：
+`dsh-client-modules` 会为链接安装的插件重算 rev，页面会换掉旧的 combo）。
+
+方法：headless Chrome 打开 `http://127.0.0.1:3080/?token=…`，
+`Emulation.setDeviceMetricsOverride({width:390,height:844,deviceScaleFactor:1,mobile:true})`
+拿到真实 390 CSS px 视口（注意：`deviceScaleFactor:2` 在 headless 下会把布局宽度也翻倍，
+innerWidth 变成 780，截图看着像手机其实是平板宽度）。
+
+390px 实测：
+
+| 检查 | 结果 |
+|---|---|
+| 顶栏高度 | 52px（`.wSkVaW_header` 覆盖） |
+| 工作区 chip 位置 | 固定在顶栏正中，`[class*="_workspace"]` 原生按钮（点开仍是原生 WorkspacePickFlow） |
+| 新建按钮 | `.dsh-mobile-newchat`，调 `ctx.get('uiWorkspace').startSession()` |
+| 底栏 | 无（`.dsh-mobile-bar` 恒隐藏，MobileBar 组件已移除） |
+| 输入条 | `.uV2eYG_card` 单卡片；按钮行**保留原生全套**（+ / 权限 / GenUI / 模型 / 发送） |
+| 空态 | 问候语居中（原生 `justify-content:center`），`.uV2eYG_root` 固定贴底 |
+| 抽屉 | `.hHd-Xa_logoRow` / `.hHd-Xa_newSession` 隐藏；`.hHd-Xa_regionArea` order 提前，工作区列表置顶 |
+| 遮罩 | `.dsh-mobile-scrim`，点一下关抽屉；`html.dsh-drawer-open` 由 MutationObserver 维护 |
+| 关闭抽屉 | 点会话行 / 面板行后自动收起（`matchMedia(max-width:1023px)` 才生效，桌面不收起） |
+| 桌面 1281 | 三列原样，汉堡与新建 `display:none`，chip 回到底部 hero 行 |
+
+## 2026-10-29 · 工作区 × = 原生「请选择工作区」空态
+
+原型里 chip 右侧的 × 想表达「这条新对话不选工作区」。Web 端没有「无工作区草稿」，
+所以按贴近原生的做法，× 只做宿主已经有的一个动作：取消当前选中。
+
+- 实现：`ctx.get('uiWorkspace').clearMain()`（服务上的公开方法）；
+- 结果：chip 退成「选择工作区」占位、输入条禁用（原生空态），再点 chip 就是原生
+  `WorkspacePickFlow`（列表 / 添加工作区… / 目录浏览）；
+- 没有选中会话时 × 自动隐藏（`data-none`），不出现「点了没反应」。
+
+390 实测：`new-chat` → chip=WorkSpace、× 可见 → 点 × → label=选择工作区、× 隐藏、输入条虚线禁用
+→ 点 chip → 原生选择器 → 选回 WorkSpace → label 恢复、× 复现。
+
+被否掉的三条路线（同一轮实测）：
+
+1. `session.create({})`：会话落到宿主进程的 `defaultCwd`（dsh-web 的 `WorkingDirectory=/home/yxw`），
+   确实不进任何工作区；但客户端的会话列表这条 summary **没有 cwd**（`sessions.create` 只回 sessionId），
+   空态 chip 退化成「选择工作区」且输入条被 `inert`，是坏状态；
+2. `uiWorkspace.openSession(id)` 无法让 hero 重新绑定到这条会话；
+3. 宿主 `attachSession` 要求 `cwd realpath === workspace.path`，跨目录搬 = 换一条会话。
+
+## 2026-10-29 · 又一次 `403 source not allowed`
+
+现象：手机扫码后直接 403，桌面正常。
+
+排查：
+
+| 检查 | 结果 |
+|---|---|
+| 面板 `GET /rejects` | 最近 5 条全是 `10.140.140.3` 的 403（`/`、`/favicon.ico`） |
+| Caddyfile 白名单 | `127.0.0.1 ::1 192.168.1.0/24 10.140.140.223 .221 .222 .2` —— 没有 `.3` |
+| 昨天同一位置 | 手机当时是 `.2`，也是先 403、后来补进名单的 |
+
+根因：白名单是**逐 IP 钉死**的，而 EasyTier 的地址是 DHCP 式的，成员重连就换一个
+（昨天 `.2`，今天 `.3`）。每换一次就要手工补一条，属于设计缺陷而不是操作失误。
+
+处置：
+
+1. 线上 Caddyfile 把组网网段一起放行：`@lan remote_ip ... 10.140.140.0/24`，
+   `caddy validate` 通过后 `systemctl --user reload dsh-proxy`（不重启 dsh-web）；
+2. 生成器同步修：`lib/deploy/render.js` 由虚拟 IP 推出 `/24` 网段 → 模板新增
+   `@@MESH_CIDR@@`，以后重新部署自带网段，不用再手工补；
+3. 顺手修掉白名单编辑器的隐患：`withEntry` 原来每 6 条换一行，而 Caddy 不接受同名
+   matcher 定义两次（`matcher is defined more than once: @lan`，已用 `caddy validate` 验证），
+   现在恒定一行。
+
+注意：宿主侧代码在 dsh-web 启动时加载，第 2、3 条要**重启一次 dsh-web** 才进内存。
+重启前面板「生成部署脚本」会报 `模板占位符未提供值：MESH_CIDR`（新模板 + 旧代码），
+按提示重启即可；重启前不要从面板重新部署，否则会用旧模板覆盖掉刚加的网段。
+
+## 2026-10-29 · 手机 App 化（全屏与安全区）
+
+分两条路，因为平台限制不同：
+
+- **iOS**：A2HS（分享 → 添加到主屏幕）走 `apple-mobile-web-app-capable`，不需要 HTTPS；
+  `black-translucent` 让状态栏悬浮，因此顶栏/抽屉/输入条都要吃 `env(safe-area-inset-*)`。
+- **Android**：DSH 自带 `/manifest.webmanifest`（`display: fullscreen`），但**安装**需要 HTTPS；
+  没有 HTTPS 时只能：① 添加到主屏幕 = 快捷方式（仍有地址栏）；② Fullscreen API 按钮（已做）。
+
+实现：
+
+| 位置 | 内容 |
+|---|---|
+| `lib/index.js` | `webserver/index-inject` 注入 theme-color（深/浅）、apple-* 四条与 `apple-touch-icon` |
+| `lib/index.js` | `webServer.tapIndex` 把 viewport 补成 `viewport-fit=cover, interactive-widget=resizes-content` |
+| `lib/index.js` | `/remote-panel/app/icon-180.png` 公开路由（浏览器抓图标不带面板令牌） |
+| `lib/assets/icon-180.png` | 180×180，黑底蓝鱼标（沿用原型里的 FishLogo 路径） |
+| `lib/client.js` | 设置 → 远程访问 增加「手机全屏」卡：Fullscreen API 按钮 + A2HS 指引 + 独立窗口判定 |
+| `lib/client.js` | 窄屏 CSS：顶栏/抽屉吃 `safe-area-inset-top`，输入条已吃 bottom；`body{overscroll-behavior:none}` |
+
+实测（重启后的真实进程，390 视口）：设置页渲染出「手机全屏」卡与「进入全屏」按钮，无控制台异常；
+`/render` 生成的 Caddyfile 已带 `10.140.140.0/24`（说明 15:11 那次重启把上一轮的生成器修复带进去了）。
+
+注意：head 注入与图标路由是**宿主侧**代码，本次改动晚于 15:11 那次重启，需要再重启一次 dsh-web 才生效
+（客户端部分走 HMR，已经生效）。
+
+## 2026-10-29 · Caddy TLS 准备（未切换线上）
+
+目标：先把「以后可以切 HTTPS」的路铺好，线上 8710 保持明文不动。
+
+先做了一次实验，两个结论都很关键（Caddy 2.6.2）：
+
+| 配置 | 结果 |
+|---|---|
+| `auto_https off` + `localhost:8793 { tls internal }` | 握手 `no certificate available for 'localhost'`：**off 连证书自动化一起关了** |
+| `auto_https disable_redirects` + 同名站点 | `cert_obtained`，证书可用 |
+| `auto_https disable_redirects` + `10.140.140.223:8795 { tls internal }` | 签发成功，SAN = `IP Address:10.140.140.223`，`curl --cacert root.crt` 能验过 |
+
+据此接入：
+
+1. `renderDeploy` 增加 `tls` 开关：站点写 `IP:端口`、加 `tls internal`、`auto_https` 切
+   `disable_redirects`；`summary.urls` 与安装脚本里的地址跟着换协议；
+2. 安装脚本的健康检查改成 `curl -sk https://127.0.0.1:PORT/healthz`（本机没有信任链，只探活）；
+3. 配对链接按请求的 `X-Forwarded-Proto` 走 https，不再写死；
+4. 新增 `/remote-panel/app/ca.crt`（Caddy 根证书导出，用户名下或系统级自动找）；
+5. 向导加「启用 HTTPS」勾选，默认关；面板地址显示改用当前页面协议。
+
+验证（临时端口 8796，不碰线上）：用渲染出的 TLS 版 Caddyfile 起一个实例 →
+`/healthz` 走 https + 根证书返回 `ok`；不带门禁 Cookie 访问 `/` 返回 401；对 TLS 端口发明文请求返回 400。
+`caddy validate` 通过。
+
+线上仍是 `http://10.140.140.223:8710`；切换需要一次重新部署（向导里勾上 HTTPS）并让手机装根证书。
+宿主侧代码（导出路由、scheme、默认值）要等下一次 dsh-web 重启才生效。
+
+## 2026-10-29 · 线上切到 HTTPS（内部 CA）
+
+手机装好根证书后执行，改动只有 3 行（`auto_https off → disable_redirects`、站点 `:8710 → 10.140.140.223:8710`、加 `tls internal`），
+`caddy validate` 通过后 `systemctl --user reload dsh-proxy`，**没有重启 dsh-web**。
+
+实测（本机用根证书当信任链，等价于手机装好证书后的效果）：
+
+| 请求 | 结果 |
+|---|---|
+| `https://10.140.140.223:8710/healthz` | `ok`（200） |
+| `https://…/`（无门禁 Cookie） | 401 |
+| `http://…/healthz`（明文打到 TLS 端口） | 400 `Client sent an HTTP request to an HTTPS server.` |
+| 证书 SAN | `IP Address:10.140.140.223`（内部 CA 签的） |
+| `/pair?k=…&token=…` → 首页 | 303 → 200（`__DSH_BOOT__` 在，42 KB） |
+| 面板 API（https + 令牌） | `{"ok":true,…}` |
+
+回滚：`~/.config/caddy/Caddyfile.pre-tls-<时间>` 覆盖回去 + `systemctl --user reload dsh-proxy`。
+
+已知小尾巴：面板「检测 → healthz」显示 400（红点）。原因链：
+
+1. 内存里的探测先试 `https://127.0.0.1:8710/healthz`；
+2. Caddy 按 **SNI** 选站点，站点是 `10.140.140.223:8710`，绕回环连过去拿不到证书 →
+   `tlsv1 alert internal error`；
+3. 退回 http → 400 `Client sent an HTTP request to an HTTPS server.`
+
+修法：探测直接连站点地址（`probeHealth(port, { host: state.ip })`），实测
+`{ok:true, status:200, scheme:'https'}`；同一次提交还给 `/pair` 加了 `requestScheme`
+（按 `X-Forwarded-Proto` 出 https 链接，实测线上 API 已返回 `https://…/pair?…`）。都要下次重启生效。
+
+## 2026-10-29 · 程序坞入口（桌面端）跟着切 HTTPS
+
+切 TLS 之后，桌面上程序坞的 DSH 入口（`~/.local/share/applications/dsh-web.desktop` →
+`~/.local/bin/dsh-web-open`）打开的是宿主打印的 `http://…` 地址，落到 TLS 端口上只会 400。
+
+改动：
+
+1. `dsh-web.service` 的 `--public-url` 改 `https://10.140.140.223:8710/`（daemon-reload，下次重启生效）；
+2. 启动脚本不再照抄 journal 里的地址：用面板落库的 `ip:port` + journal 里最新的 token 拼
+   `/pair?k=&token=` 组合链接（门禁 Cookie 与登录令牌一次种好），先探 https、再退 http，
+   都探不通才退回宿主打印的原始地址；
+3. 本机信任内部 CA：`/usr/local/share/ca-certificates/caddy-local-root.crt` + `update-ca-certificates`，
+   并写进 Chrome 的 NSS 库（`certutil -d sql:$HOME/.pki/nssdb -A -t 'C,,'`）。
+
+踩到的坑：旧脚本把 journal 的「最后一条」直接当目标，遇到回环地址（或 https 探测瞬断）时仍拼成
+`https://<host:port>/pair…`，明文端口收到 TLS 握手 → `ERR_SSL_PROTOCOL_ERROR`。现在只有探测通过的
+scheme 才会用 `/pair`，且 host 来自落库状态而不是日志。
+
+验证：冷 profile 打开脚本生成的链接 → 最终停在 `https://10.140.140.223:8710/`，`#root` 已挂载、
+`__DSH_BOOT__` 存在、无证书错误；系统 curl 不带 `--cacert` 也是 200。
+
+## 2026-10-29 · 配对链接的协议不能只看请求头
+
+现象：已经切 https，面板里的配对链接仍是 `http://…:8710/pair?k=…`。
+
+原因：面板被「直连 3080」打开（桌面客户端 DSH Tauri 走 `http://127.0.0.1:3080`，或回环书签）。
+这种请求没有 `X-Forwarded-Proto`，`requestScheme()` 只能如实回 http —— 但**对外真正的入口是 Caddy**，
+于是链接错了。
+
+修法：协议以「线上 Caddyfile 是否 `tls internal`」兜底（`detectTls()`），请求头只作为第一优先。
+`/pair` 与 `/status` 都改；面板地址行也改用 `/status` 返回的 scheme，不再读 `location.protocol`。
+
+验证（直接调用路由处理函数，绕过 HTTP）：
+
+```
+handler({ req: { headers: {}, socket: {} } })            -> https://10.140.140.223:8710/pair?k=…
+handler({ req: { headers: {'x-forwarded-proto': 'https'} } }) -> https://10.140.140.223:8710/pair?k=…
+```
+
+同一次重启（17:17:48）也把探测的 SNI 修法带上了：`/probe` 现在返回 `{"healthz":{"scheme":"https","ok":true,"status":200}}`。
+
+## 2026-10-29 · M1 手机 App 化收尾
+
+| 项 | 做法 | 验证 |
+|---|---|---|
+| 自带 manifest | `/remote-panel/app/manifest.webmanifest`：`display: fullscreen`、`start_url/scope = /`、192/512 + maskable 三张图标；head 里注入 `<link rel="manifest">`（排在最前，覆盖 DSH 自带那份） | 单测断言字段；重启后 `curl` 见 |
+| 主屏名 | `apple-mobile-web-app-title` 改 `DSH` | head 注入可见 |
+| 安装引导 | 设置 →「手机 App」卡：https 且有 `display-mode` 判定；standalone 显示「✓ 已在独立窗口运行」 | 390 实测卡片渲染 |
+| 返回键 | 抽屉打开时 `history.pushState({dshDrawer:true})`，`popstate` 先收抽屉；关闭时只回退自己那条 | 实测：开 → state 有标记、宽 280；`history.back()` → 收起、宽 0 |
+| 本机反馈 | 1.5s 轮询发送按钮 `aria-label`（空闲=`发送消息`，生成中换文案）+ 对话框文案判定「待确认」；后台时闪标题 + `navigator.vibrate`，开关存 localStorage | 代码路径打通；真实「跑完」需要在手机上验收 |
+
+注意：manifest 与图标是**宿主侧**改动，要下次重启 dsh-web 才生效；客户端部分已 HMR 生效。
+
+## 2026-10-29 · 手机抽屉收成「对话 + 改动 + 余额」
+
+按产品口径：手机上 DSH 只做三件事——看对话、看改动、看余额。抽屉里把面板入口裁到只剩一个：
+
+- 隐藏：插件 / 自动化任务 / 命令面板 / MCP 连接器 / 更多（`aria-label` 精确匹配，避免误伤）
+- 保留：工作区 Git（改动摘要 `+91 −103` 直接显示在行尾）
+- 底部仍是余额 + 账号
+
+390 实测：抽屉里只剩「工作区」列表、一行「工作区 Git」、余额与账号；面板列表容器仍在，只是那五行 `display: none`。
+
+注：匹配用的是中文 `aria-label`，宿主改文案时需要同步这五条选择器。
+
+## 2026-10-29 · M3 证书过期 / 续签失败自检
+
+补的缺口：面板的探活用的是 `rejectUnauthorized:false`，**证书过期照样握手成功**，所以续签失败时面板一直显示健康，
+手机却全挂。
+
+实现（只读，不触发续签、不碰 admin API）：
+
+| 位置 | 内容 |
+|---|---|
+| `lib/probe.js` | `probeCertificate({host,port})`：`tls.connect` 拿叶子证书，判 `剩余 > 2h` + `SAN 覆盖站点的 IP`；`probe().cert` 带 `{ok, expiresAt, hoursLeft, san, reason?}` |
+| `lib/index.js` | `/probe`、`/diag` 带 `cert`；`/doctor` 追加 `tls.cert` 检查（label「证书有效期」，不足 2h 为 warn）；`/status.tls` 轻量字段（不探测） |
+| `lib/client.js` | 待接：doctor 行优先显示 `label`，面板展示剩余小时（M2 收工后统一改） |
+
+实测：`{"ok":true,"expiresAt":"2026-10-29T20:16:40.000Z","hoursLeft":10.5,"san":"IP Address:10.140.140.223"}`，探测耗时 42ms。
+
+一个时间读错的更正：证书 `notAfter "Oct 29 20:16:40 2026 GMT"` 是 **UTC**，本地是 `10-30 04:16:40 CST`，
+所以「还剩 10.5 小时」才对，不是 2–3 小时。Caddy 的叶子证书是 12 小时一轮、自动续签。
+
+单测：`npm test` 137 项 → 136 pass / 1 skip（新增证书判定五个分支）。
+
+## 2026-10-29 · M2 手机会话内体验
+
+只改 `lib/client.js`（全部在 `@media (max-width: 1023px)` 内），390×844 DPR1 实测：
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| 顶栏标题可见宽度 | 104px（截断） | **170px**（`scrollWidth == clientWidth`，完整显示） |
+| 右侧动作条 | 110px | 35px（子智能体只留 spinner + 箭头；「更多操作」56px → 0） |
+| 代码字号 | 11px/19px | 13px/20px + 块内横向滚动 |
+| 复制按钮 | 原生 11px | 48×28「复制 / 已复制」，每块最多 1 个 |
+| 表格 | 319/380 溢出 | 槽内横向滚动，页面 `scrollWidth` 恒 390 |
+| 图片 | 1200×900 撑宽 | 314×314（容器宽），点击开原图 |
+| 附件 | — | 3×240px 卡在 383px 行内不溢出 |
+
+幂等/清理：12 次 DOM 变更后仍 11 块 / 11 按钮；390→1280 按钮 10→0 且原生样式恢复；
+`cleanup` 后按钮清空、Observer 断开、全局句柄删除。注入点用 `.md-code-block` +
+`[data-code-block-banner]`（稳定的语义类），顶栏依赖 DSH 的 hash 类名（升级后可能要补选择器）。
+
+## 2026-10-29 · 集成：证书灯 + 断线胶囊
+
+- 运行状态卡加一盏「证书 N Nh」灯（数据来自 M3 的 `probe.cert`），不健康时出红色告警行；
+  doctor 行改成 `check.label ?? check.id`，M3 的 `tls.cert` 能显示「证书有效期」。
+- 断线提示：每 10s `callApi('/status')`，连续两次失败弹顶部胶囊「连接已断开，正在重连…」。
+  实测（CDP 阻断 `/remote-panel/api/status`）：阻断 23s 后出现、放开后消失，无控制台异常。
+
+## 2026-10-29 · 重启后验收（M1/M2/M3 全链路）
+
+重启 dsh-web 后逐项复查：
+
+| 检查 | 结果 |
+|---|---|
+| head 注入 | `theme-color`×2、`apple-mobile-web-app-title=DSH`、`apple-touch-icon`、**我们的 manifest 链接排在最前**、viewport（`viewport-fit=cover, interactive-widget=resizes-content`） |
+| `/remote-panel/app/*` | manifest 200（579B）、icon-192/512/maskable 200、`ca.crt` 200 |
+| `/status` | `scheme: "https"`、`tls: { enabled: true }` |
+| `/probe` | `cert { ok: true, hoursLeft: 9, san: IP Address:10.140.140.223 }`、`healthz { ok: true, scheme: https }` |
+| `/doctor` | `{ id: "tls.cert", label: "证书有效期", state: "ok", detail: "剩余 9 小时…" }` |
+| `/pair` 直连 3080（无 X-Forwarded-Proto） | 返回 `https://10.140.140.223:8710/pair?k=…`（协议兜底生效） |
+| 390 会话页 | 5 个代码块 → 5 个 `.dsh-code-copy` 按钮；页面 `scrollWidth` 恒 390；标题完整可读 |
+| 390 面板 | 运行状态五盏灯全绿（EasyTier/Caddy/healthz/上游 DSH/**证书 9h**），配对链接是 https |
+
+发现但本轮**没有**改的：设置弹窗在 390 下仍是「左导航 188 + 右内容 154」，内容列被挤窄。
+试过用 `:has()` 改成上下排布，导航条会变成横条且被裁，比原来更差，已回滚。
+正确做法已落地：把导航列改成顶部一条可横滑的标签条。
+
+```css
+[role="dialog"]:has(> [class*="_nav"]) { flex-direction: column; }
+[role="dialog"] > [class*="_nav"] { width: 100%; border-bottom: 1px solid …; }
+[role="dialog"] > [class*="_nav"] > [class*="_navTitle"] { display: none; }
+[role="dialog"] > [class*="_nav"] [class*="_navList"] { flex-direction: row; overflow-x: auto; }
+[role="dialog"] > [class*="_nav"] [class*="_navCell"] { flex: 0 0 auto; width: auto; height: 34px; white-space: nowrap; }
+[role="dialog"] > [class*="_content"] { flex: 1 1 auto; width: 100%; min-width: 0; }
+```
+
+实测 390：弹窗 342×776，导航 342×43（列表 scrollWidth 886，横滑），内容 342×733，
+页面 `scrollWidth` 恒 390；「远程访问」页正常渲染（五盏灯含 **证书 8.7h**、二维码、https 配对链接）。
+`:has(> _nav)` 做守卫，其它 dialog（权限确认等）不受影响。
+
+![手机面板](live-mobile-panel.png)

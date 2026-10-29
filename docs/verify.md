@@ -17,14 +17,25 @@ dsh plugin --profile web add dsh-remote-panel
 
 | # | 操作 | 通过标准 | 失败先查 |
 |---|---|---|---|
-| H1 | 390px 下看顶部 | 出现 ☰，点开侧栏、再点收起 | Console 有无 `[remote-panel] 未匹配到布局容器` |
-| H1 | 390px 下看底部 | 出现三格底栏（会话/对话/插件），可点 | 元素面板搜 `.dsh-mobile-bar` 是否存在 |
-| H2 | 侧栏展开后 | 浮在内容之上、铺到底、有阴影 | 查 `[class*="_sidebarCol"]` 是否命中 |
-| H2 | 点抽屉外空白 | 抽屉收起，且不误触下方正文 | `html.dsh-drawer-open` 是否在切换 |
-| H3 | 390px 正文 | 占满宽度（不是 56px 竖条） | `[class*="_frame"]` 的 `grid-template-columns` |
-| H3 | 输入框 | 贴底，键盘弹出不被顶飞 | — |
+| H1 | 390px 下看顶部 | 左边 ☰、中间工作区 chip（点开是原生工作区菜单）、右边 ＋ 新建 | Console 有无 `[remote-panel] 未匹配到布局容器` |
+| H1 | 点 ＋ | 在「当前会话所在工作区 → 最近工作区」开一条空白对话 | `ctx.get('uiWorkspace')` 是否有值 |
+| H1 | 390px 下看底部 | **没有**三格底栏；输入条是一整块卡片，按钮行保留原生控件（+ / 权限 / GenUI / 模型 / 发送） | 元素面板搜 `.dsh-mobile-bar` |
+| H2 | 侧栏展开后 | 黑色浮层铺到底；工作区列表在面板入口之上 | 查 `[class*="_sidebarCol"]` 是否命中 |
+| H2 | 点抽屉外空白 | 抽屉收起，且不误触下方正文 | `.dsh-mobile-scrim` 是否存在、`html.dsh-drawer-open` 是否在切换 |
+| H2 | 点会话行 / 面板行 | 选完抽屉自动收起（桌面不收起） | 是否 `matchMedia('(max-width:1023px)')` |
+| H2 | 打开抽屉 | 只有「工作区列表 + 工作区 Git + 余额/账号」；插件/自动化/命令面板/MCP/更多 不出现 | 抽屉里是否还能看到这五个 `aria-label` |
+| H2 | 点 chip 右侧的 × | 回到「选择工作区」空态（输入条禁用），× 自动隐藏；再点 chip 弹原生选择器 | `.dsh-mobile-clear-workspace` 的 `data-none` |
+| H3 | 390px 正文 | 占满宽度 | `[class*="_frame"]` 的 `grid-template-columns` |
+| H3 | 空态 | 问候语居中、输入条贴底、整页纯黑 | `.uV2eYG_root` 是否 `position: fixed` |
+| H3 | 输入框 | 键盘弹出不被顶飞 | — |
 | H4 | 全局搜索 `dsh-remote-panel-shell` | 只有一份 `<style>` | — |
-| H5 | 1281px | 无底栏、无汉堡、布局原样 | `@media (min-width:1024px)` 是否生效 |
+| H5 | 1281px | 无汉堡、无新建、布局与原生一致（chip 回到底部 hero 行） | `@media (min-width:1024px)` 是否生效 |
+| H6 | iPhone：分享 → 添加到主屏幕 → 桌面图标打开 | 没有地址栏 / 工具栏，安全区不被状态栏压住 | head 里是否有 `apple-mobile-web-app-capable` 与 `apple-touch-icon` |
+| H6 | Android：设置 → 远程访问 → 手机全屏 | 点「进入全屏」后浏览器 UI 消失；切走再回来仍在 | `document.fullscreenEnabled` |
+| H6 | 独立窗口里打开 | 卡片显示「已经在独立窗口里运行」，不再给全屏按钮 | `display-mode: standalone` |
+| H7 | 重新部署时勾「启用 HTTPS」 | 生成的 Caddyfile 是 `IP:端口 { tls internal }` + `auto_https disable_redirects` | 脚本里搜 `tls internal` |
+| H7 | 手机装根证书后访问 `https://…:8710` | 扫码配对、全屏、安装都可用；Android 可「安装应用」 | 面板「手机全屏」里的下载根证书链接 |
+| H7 | 已切 HTTPS 的机器上 | `https://…/healthz` 返回 `ok`；明文访问返回 400；配对二维码是 https | `curl --cacert <根证书> https://…/healthz` |
 
 控制台一次性自检（粘进 Console 执行）：
 
@@ -33,14 +44,16 @@ dsh plugin --profile web add dsh-remote-panel
   frame: !!document.querySelector('[class*="_frame"]'),
   sidebar: document.querySelectorAll('[class*="_sidebarCol"]').length,
   collapsed: !!document.querySelector('[class*="_collapsed"]'),
-  bar: !!document.querySelector('.dsh-mobile-bar'),
   hamburger: !!document.querySelector('.dsh-mobile-hamburger'),
+  newChat: !!document.querySelector('.dsh-mobile-newchat'),
+  scrim: !!document.querySelector('.dsh-mobile-scrim'),
   drawerOpen: document.documentElement.classList.contains('dsh-drawer-open'),
   style: !!document.getElementById('dsh-remote-panel-shell'),
 })
 ```
 
-期望：`frame/sidebar/bar/hamburger/style` 全为真；390px 下 `bar` 为真而 1281px 下为假。
+期望：`frame/sidebar/hamburger/newChat/scrim/style` 全为真；
+390px 下汉堡与新建可见，1281px 下两者 `display: none`。
 
 ---
 

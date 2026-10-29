@@ -61,7 +61,8 @@ test('渲染产物不含未替换占位符', () => {
 test('Caddyfile 含白名单、门禁与 healthz', () => {
 	const { files } = renderDeploy(base)
 	const caddy = files['~/.config/caddy/Caddyfile']
-	assert.match(caddy, /remote_ip 127\.0\.0\.1 ::1 192\.168\.1\.0\/24 10\.140\.140\.223/)
+	// 组网网段要按 CIDR 一起放行：EasyTier 成员重连会换 IP，只钉单 IP 会反复 403
+	assert.match(caddy, /remote_ip 127\.0\.0\.1 ::1 192\.168\.1\.0\/24 10\.140\.140\.223 10\.140\.140\.0\/24/)
 	assert.match(caddy, /handle \/healthz/)
 	assert.match(caddy, /query k=MwcufbMjggfe3b8wYm8Rxykm/)
 	assert.match(caddy, /reverse_proxy 127\.0\.0\.1:3080/)
@@ -148,4 +149,25 @@ test('Caddyfile 提供 /pair 同源跳转入口', () => {
 	const { files } = renderDeploy(base)
 	assert.match(files['~/.config/caddy/Caddyfile'], /handle \/pair/)
 	assert.match(files['~/.config/caddy/Caddyfile'], /location\.replace/)
+})
+
+test('可选 TLS：内部 CA + IP 站点 + 关闭自动跳转', () => {
+	const out = renderDeploy({ ...base, tls: true })
+	const caddy = out.files['~/.config/caddy/Caddyfile']
+	// auto_https 不能是 off：off 连证书自动化一起关掉，tls internal 就签不出证书
+	assert.match(caddy, /auto_https disable_redirects/)
+	assert.match(caddy, /^10\.140\.140\.223:8710 \{$/m)
+	assert.match(caddy, /^\ttls internal$/m)
+	assert.equal(out.summary.urls.mesh, 'https://10.140.140.223:8710/')
+	assert.ok(out.install.includes('https://127.0.0.1:${PROXY_PORT}/healthz'))
+	assert.ok(out.install.includes('https://${VIRTUAL_IP}:${PROXY_PORT}/'))
+})
+
+test('默认仍是明文 HTTP', () => {
+	const out = renderDeploy(base)
+	const caddy = out.files['~/.config/caddy/Caddyfile']
+	assert.match(caddy, /auto_https off/)
+	assert.match(caddy, /^:8710 \{$/m)
+	assert.doesNotMatch(caddy, /tls internal/)
+	assert.equal(out.summary.urls.mesh, 'http://10.140.140.223:8710/')
 })

@@ -57,6 +57,16 @@ test('条目格式校验', () => {
 	assert.throws(() => validateEntry(''), /为空/)
 })
 
+test('条目变多也保持一行（Caddy 不接受同名 matcher 定义两次）', () => {
+	let text = caddyfile
+	for (const ip of ['10.140.140.2', '10.140.140.3', '10.140.140.4', '10.140.140.5']) {
+		text = withEntry(text, ip, 'add')
+	}
+	const lines = text.split('\n').filter((line) => line.includes('@lan remote_ip'))
+	assert.equal(lines.length, 1)
+	assert.equal(parseEntries(text).length, 8)
+})
+
 test('放行全部来源需要二次确认', () => {
 	assert.throws(() => validateEntry('0.0.0.0/0'), /二次确认/)
 	assert.equal(validateEntry('0.0.0.0/0', { force: true }), '0.0.0.0/0')
