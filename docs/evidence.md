@@ -627,3 +627,23 @@ sidebar(drawer)   #1b1b1c
 `prefers-reduced-motion: reduce` 时全部关掉。
 
 实测：开抽屉 60ms 时遮罩 opacity 0.84、160ms 后 1、关闭后回到 0；顶栏 `padding-top: 11px`、高度 52px（无刘海留白）。
+
+## 2026-10-30 · 手机端卡顿定位：content-visibility 是元凶
+
+用 CDP 把 CPU 节流到 4x（模拟中低端手机）后跑 90 帧程序化滚动：
+
+| 配置 | avg | p95 | max |
+|---|---|---|---|
+| 带 `content-visibility:auto`（上一版） | 18.5ms | 19.0ms | **155.9ms** |
+| 去掉后 | 16.6ms | 17.2ms | **17.4ms** |
+
+155ms 的长帧就是用户说的「卡顿」：块进入视口时要重新布局+绘制。去掉后滚动稳定在 60fps 上限。
+
+同时做的：
+
+- 去掉抽屉入场动画（整棵抽屉子树做 opacity/transform，反而更卡），只保留遮罩 160ms 淡入；
+- 全局 `-webkit-tap-highlight-color: transparent` + `:focus:not(:focus-visible){outline:none}`，点按不再留灰/蓝色块；
+- 抽屉开合实测：4x 节流下两帧 31.6ms 完成，展开宽度 280、遮罩 opacity 1。
+
+刘海：APK 侧加 `windowLayoutInDisplayCutoutMode=shortEdges` + `setDecorFitsSystemWindows(false)`（v5），
+页面侧已经没有 `env(safe-area-inset-top)`，两边都铺满才能盖住切角区。
