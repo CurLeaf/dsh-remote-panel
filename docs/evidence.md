@@ -925,3 +925,21 @@ body[data-ds-dark-theme] [class*="_bottomRow"] { background: #000 !important; }
 
 实测（390）：第一行「4 轮 53 步 · 188 tok/s」+「13.1M tok · 缓存命中 99%」并排（间距 14px），
 第二行是占比胶囊；不再互相挤压，也不再是一颗一行。
+
+## 2026-10-30 · 统计挪到顶部托盘 + 「+」对齐修正
+
+用户要求：统计别把输入区撑高，放到顶部右上角，像手机托盘状态；并且「+」要和标题对齐。
+
+两处一起改：
+
+1. **「+」错位**：`.dsh-mobile-newchat` 是固定定位 + 内联 `top: 6`，顶栏被安全区顶下去后它就悬在上面。
+   用 `!important` 覆盖成 `top: calc(6px + var(--dsh-safe-top))`，和标题同一基线（实测 header 52..87、「+」46..86）。
+2. **统计托盘**：`.uV2eYG_dock` 从输入条下方（占 66px 高）改成 `position: fixed` 放到安全区里：
+   - `top: max(2px, calc(var(--dsh-safe-top) - 28px))`
+   - `right: calc(58px - min(48px, var(--dsh-safe-top)))` —— 有安全区时贴边，没有时让开「+」
+   - 字号 10.5px、圆角胶囊、半透明黑底 + 1px 内边
+   - pill 里的 label 自带 `max-width` 会被截断（`2 轮 8 步 · 211 …`），这里放开 `max-width/overflow`
+   - 只留「轮次/步数 + tok/s」与「token + 缓存命中」，分支/占比在面板里看
+
+实测（390、注入 40px 安全区）：托盘子 28px 高、y=12（安全区内）、右边缘留 18px；
+输入条座位 172 → **106px**（统计不再占位）；「+」与标题同基线。
