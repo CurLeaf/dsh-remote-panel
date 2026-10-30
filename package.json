@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-panel",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "DSH 远程访问控制面：部署向导、状态面板与一键配对（EasyTier + Caddy），数据面保持进程外。",
   "type": "module",
   "main": "./lib/index.js",
