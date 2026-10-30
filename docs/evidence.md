@@ -777,3 +777,45 @@ APK 0.2.8（versionCode 8）。
 
 真机排查手段：URL 加 `?dsh-fps=1`（或先访问 `/remote-panel/app/go.html?fps=1`）会在左下角显示
 实时 FPS / 最慢帧 / 长任务数，平时完全不加载。
+
+## 2026-10-30 · 产品化补齐（安全 / 契约 / 安全区 / 回归）
+
+按上一轮体检结论动手，四件事：
+
+### 1. 修掉令牌泄露（P0）
+
+`/remote-panel/app/go.html` 原本免门禁且写着当前进程令牌 —— 实测不带 Cookie 就能读到（`token=LRmk4_…`），
+等于门禁被绕过。改成：
+
+| 路径 | 鉴权 | 内容 |
+|---|---|---|
+| `/remote-panel/app/*` | 免（静态） | manifest / 图标 / 根证书 / APK / 旧入口提示页 |
+| `/remote-panel/login` | **要门禁 Cookie** | 带当前令牌的跳转页 `login.html` |
+| `/pair?k=口令` | 免（交换口令） | 种 Cookie 后跳到登录页 |
+
+实测：`login` 无 Cookie → **401**；走 `/pair` 全链路 → 200 且含令牌；`go.html` 已无任何令牌/口令。
+二维码链接同步改为只带口令（`combo` 不再含 `token=`），并有测试兜住。
+
+### 2. 外壳契约自检（P0）
+
+新增 `lib/contract.js`（宿主侧 CSS 挂点扫描）+ 客户端 `installShellContractReport()`：
+
+- 客户端启动 1.5s 后检查 `wSkVaW_ / uV2eYG_ / pXSMma_ / pI_x6G_` 是否还在 DOM 里，报到 `POST /shell`；
+- `/status` 带 `shell` 字段，面板「运行状态」多一盏「外壳适配」灯，缺失时显红并列出缺的挂点。
+
+### 3. 底部安全区（P1）
+
+顶部做了 `--dsh-safe-top`，底部一直只有 `env()`（WebView 里是 0）。现在壳同时注入
+`--dsh-safe-bottom`（同样 `/density` + 上限 48），抽屉、会话输入条、hero 输入条、弹窗统一用
+`max(env(...), var(--dsh-safe-bottom))`。
+
+### 4. 冒烟回归（P1）
+
+新增 `test/e2e/shell.mjs`（零依赖，CDP 直连）：
+
+```bash
+DSH_E2E_URL="http://127.0.0.1:3080/?token=…" npm run e2e
+```
+
+11 项断言：外壳样式注入、汉堡/遮罩节点、无横向溢出、纯黑底、安全区变量、抽屉开合、遮罩可见/淡出。
+本次实测全绿。没有 URL 或没有 Chrome 时自动跳过，不进 CI 也不影响 `npm test`。

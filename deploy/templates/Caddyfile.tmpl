@@ -25,7 +25,7 @@
 		handle /pair {
 			header Set-Cookie "dsh_gate=@@ACCESS_KEY@@; Max-Age=31536000; Path=/; HttpOnly; SameSite=Lax"
 			header Content-Type "text/html; charset=utf-8"
-			respond `<!doctype html><meta charset="utf-8"><title>正在连接…</title><script>const t=new URLSearchParams(location.search).get("token");location.replace(t?"/?token="+encodeURIComponent(t):"/")</script>` 200
+			respond `<!doctype html><meta charset="utf-8"><title>正在连接…</title><script>const t=new URLSearchParams(location.search).get("token");location.replace(t?"/?token="+encodeURIComponent(t):"/remote-panel/login")</script>` 200
 		}
 
 		# 诊断用：不经过任何认证
@@ -62,6 +62,12 @@
 		# Caddy 默认没有 cookie 匹配器，用 Header 通配匹配替代
 		@paired header Cookie "*dsh_gate=@@ACCESS_KEY@@*"
 		handle @paired {
+			# 带令牌的跳转页：必须过了门禁才能拿
+			handle /remote-panel/login* {
+				root * @@APP_DIR@@
+				rewrite * /login.html
+				file_server
+			}
 			# 关键：不重写 Host/Origin。DSH 通过 --trusted-host 接受这个 authority，
 			# Cookie 因此天然同源，不需要任何注入或伪造。
 			reverse_proxy 127.0.0.1:@@UPSTREAM_PORT@@

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { APP_PREFIX, MANIFEST_PATH, appHeadInjections, appManifest, requestScheme, syncAppAssets, tlsStatus, withAppViewport } from '../lib/index.js'
+import { APP_PREFIX, MANIFEST_PATH, appHeadInjections, appManifest, requestScheme, syncAppAssets, tlsStatus, withAppViewport, writeLandingPage, writeLoginPage } from '../lib/index.js'
 
 test('head 注入：主题色、iOS 独立窗口、桌面图标；不重复声明 manifest', () => {
 	const rows = appHeadInjections()
@@ -76,6 +76,28 @@ test('syncAppAssets 把清单与图标落到 Caddy 目录，且幂等', async ()
 		await new Promise((r) => setTimeout(r, 20))
 		syncAppAssets(dir)
 		assert.equal(statSync(join(dir, 'manifest.webmanifest')).mtimeMs, before, '内容未变时不应重写')
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+})
+
+test('令牌只出现在门禁之后的登录页，免鉴权的旧入口不再带任何凭据', async () => {
+	const { mkdtempSync, readFileSync, rmSync } = await import('node:fs')
+	const { tmpdir } = await import('node:os')
+	const { join } = await import('node:path')
+	const dir = mkdtempSync(join(tmpdir(), 'panel-login-'))
+	try {
+		const token = 'tok_abcdefghijklmnop'
+		const target = writeLoginPage(dir, token)
+		assert.equal(target, `/?token=${token}`)
+		const login = readFileSync(join(dir, 'login.html'), 'utf8')
+		assert.ok(login.includes(token), '登录页应带令牌')
+		assert.match(login, /remote-panel\/login|\/\?token=/)
+
+		writeLandingPage(dir)
+		const landing = readFileSync(join(dir, 'go.html'), 'utf8')
+		assert.equal(landing.includes(token), false, '免鉴权页面不能出现令牌')
+		assert.equal(/dsh_gate|K7mQ|\?k=/.test(landing), false, '免鉴权页面也不能出现口令')
 	} finally {
 		rmSync(dir, { recursive: true, force: true })
 	}

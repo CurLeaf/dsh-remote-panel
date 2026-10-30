@@ -64,6 +64,22 @@ Caddy 的 `pki/authorities/local/root.crt`）。
 - Android：设置 → 安全 → 加密与凭据 → 安装证书 → CA 证书。
 - iOS：下载后到 设置 → 通用 → 关于本机 → 证书信任设置 里打开信任。
 
+## 安全模型：令牌只在门禁之后
+
+手机端有两道门：Caddy 的口令门禁（`dsh_gate` Cookie）+ DSH 自己的会话令牌。两者的取用顺序是：
+
+```
+扫码/点链接 → /pair?k=口令（种门禁 Cookie） → /remote-panel/login（要 Cookie，Caddy 直接发）
+            → /?token=…（换取 DSH 会话）
+```
+
+- 二维码里**只有口令**，没有令牌；
+- 带令牌的跳转页 `login.html` 放在门禁**之后**，没有 Cookie 拿不到（实测 401）；
+- 免鉴权的 `/remote-panel/app/*` 只放静态资源（manifest / 图标 / 根证书 / APK），不含任何凭据；
+- 旧版 APK 的入口 `go.html` 已改成「请更新」提示页，不会再泄露令牌。
+
+APK 里内置了门禁口令（启动即过 `/pair`），所以**换口令后需要重新构建壳**。
+
 ## 手机 App（WebView 壳）
 
 PWA「安装应用」在国行 Android 上装不成：WebAPK 打包依赖 Google Play 服务，且打包服务器要能从公网

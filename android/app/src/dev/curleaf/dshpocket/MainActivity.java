@@ -23,7 +23,9 @@ import android.webkit.WebViewClient;
 public class MainActivity extends Activity {
 	private static final String SERVER = "https://10.140.140.223:8710";
 	private static final String SERVER_HOST = "10.140.140.223";
-	private static final String START = SERVER + "/remote-panel/app/go.html";
+	/** 门禁口令：启动时先过 /pair 拿到 Cookie，再由 Caddy 发带令牌的跳转页。 */
+	private static final String ACCESS_KEY = "K7mQ2vT9pLxR4nW8sZbY3cHd";
+	private static final String START = SERVER + "/pair?k=" + ACCESS_KEY;
 	private WebView web;
 
 	@Override
@@ -134,8 +136,19 @@ public class MainActivity extends Activity {
 		}
 		// 上限 48px：再大就不像「切角高度」了，宁可少留也别把版面顶坏
 		int top = Math.max(0, Math.min(48, Math.round(topPx / density)));
+		int bottomPx = 0;
+		if (Build.VERSION.SDK_INT >= 30) {
+			WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
+			if (insets != null) {
+				android.graphics.Insets merged =
+					insets.getInsets(WindowInsets.Type.displayCutout() | WindowInsets.Type.navigationBars());
+				bottomPx = merged.bottom;
+			}
+		}
+		int bottom = Math.max(0, Math.min(48, Math.round(bottomPx / density)));
 		final String js =
-			"document.documentElement.style.setProperty('--dsh-safe-top', '" + top + "px')";
+			"document.documentElement.style.setProperty('--dsh-safe-top', '" + top + "px');" +
+			"document.documentElement.style.setProperty('--dsh-safe-bottom', '" + bottom + "px')";
 		web.post(() -> {
 			if (web != null) web.evaluateJavascript(js, null);
 		});

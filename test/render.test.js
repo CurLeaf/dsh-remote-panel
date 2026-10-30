@@ -142,7 +142,10 @@ test('Caddyfile 支持 k+token 一次扫码', () => {
 test('pairingUrls 生成 combo', async () => {
 	const { pairingUrls } = await import('../lib/pair.js')
 	const urls = pairingUrls({ ip: '10.0.0.1', port: 8710, accessKey: 'k'.repeat(24), token: 't'.repeat(24) })
-	assert.equal(urls.combo, `http://10.0.0.1:8710/pair?k=${'k'.repeat(24)}&token=${'t'.repeat(24)}`)
+	assert.equal(urls.combo, `http://10.0.0.1:8710/pair?k=${'k'.repeat(24)}`)
+	assert.ok(urls.login.endsWith('/remote-panel/login'))
+	// 二维码里不能出现令牌：拿到口令才能换到令牌
+	assert.equal(urls.combo.includes('token='), false)
 })
 
 test('Caddyfile 提供 /pair 同源跳转入口', () => {
@@ -183,4 +186,17 @@ test('PWA 资源在门禁之前由 Caddy 直接发（manifest 抓取不带 Cooki
 	const appAt = caddy.indexOf('handle_path /remote-panel/app/')
 	const gateAt = caddy.indexOf('@key query k=')
 	assert.ok(appAt !== -1 && appAt < gateAt, 'PWA 资源要在口令门禁之前')
+})
+
+test('带令牌的跳转页放在门禁之后', () => {
+	const out = renderDeploy(base)
+	const caddy = out.files['~/.config/caddy/Caddyfile']
+	// 登录页必须在 @paired 里（过门禁之后），不能在免鉴权的 app 目录里
+	const loginAt = caddy.indexOf('handle /remote-panel/login*')
+	const pairedAt = caddy.indexOf('@paired header Cookie')
+	const proxyAt = caddy.indexOf('reverse_proxy 127.0.0.1:3080')
+	assert.ok(loginAt > pairedAt && loginAt < proxyAt, 'login 必须夹在 @paired 与反代之间')
+	assert.match(caddy, /rewrite \* \/login\.html/)
+	// 免鉴权的静态目录里不能再出现 go.html 之类的令牌页
+	assert.equal(caddy.includes('/remote-panel/app/go.html'), false)
 })
