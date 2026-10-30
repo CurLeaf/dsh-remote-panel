@@ -962,3 +962,20 @@ body[data-ds-dark-theme] [class*="_bottomRow"] { background: #000 !important; }
 
 实测（390 + 注入 40px 安全区）：托盘子 `x=242, y=16, w=134, h=16`，文案「61 轮 · 181 tok/s · 缓存 99.7%」；
 原 dock `display:none`；「+」与标题同基线（46 / 52）。
+
+## 2026-10-30 · 顶部状态条：左分支、右统计（两端对齐）
+
+托盘改成一条横贯顶部的状态条：
+
+```
+tmp/merge-release                              62 轮 · 181 tok/s · 缓存 99.7%
+```
+
+- 容器 `left:14 / right:14`、`display:flex; justify-content: space-between`；
+- 左段读原生 `[data-composer-stat="git-branch"]` 的文本（它仍由 DSH 渲染，只是被隐藏），
+  没有分支（非 git 工作区）时自动为空；
+- 右段是精简后的统计（`format()` 拼的 `N 轮 · S tok/s · 缓存 X%`）；
+- 两段都 `min-width:0 + ellipsis`，长分支名/大数字不会把对方挤掉；整条 `pointer-events:none`。
+
+实测（390 + 注入 40px 安全区、临时注入一个分支胶囊）：
+托盘子 `x=14 w=362`；左段 `tmp/merge-release` 宽 88（x=14），右段宽 134（x=242），两端贴边。
