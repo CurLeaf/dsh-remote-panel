@@ -895,3 +895,12 @@ body[data-ds-dark-theme] [class*="_bottomRow"] { background: #000 !important; }
 ```
 
 `30vh` 兜小屏；按钮行（`_row`）始终留在视口内。
+
+## 2026-10-30 · 输入框最大高度微调（132 → 154px）
+
+用户觉得 132px 略矮，改成 `min(154px, 34vh)`（约 7 行）。实测 390：
+
+| 状态 | input | 卡片 | maxH |
+|---|---|---|---|
+| 空态 | 52px | 118px | 154px |
+| 15 行草稿 | 154px | 220px | 154px（框内滚动，scrollHeight 722） |
