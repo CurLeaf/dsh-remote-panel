@@ -659,3 +659,13 @@ sidebar(drawer)   #1b1b1c
 | 自适应前景（108~432） | 透明底 | 52%（安全区内） |
 
 自适应背景仍是纯白（`@color/ic_launcher_background`）。versionCode 6 / 0.2.6，APK 63 KB。
+
+## 2026-10-30 · PWA 图标统一成白底黑鲸
+
+跟 APK 图标保持一致（同一张 `favicon.svg` 鲸鱼，无环）：
+
+- `lib/assets/icon-180/192/512.png`：白底，鲸鱼 62%；
+- `lib/assets/icon-maskable-512.png`：白底，鲸鱼 52%（安全区）。
+
+改完已同步到 Caddy 的 `~/.dsh/remote-panel-app/`（`syncAppAssets` 下次启动也会覆盖成同一份），
+`/remote-panel/app/icon-*.png` 全部 200，manifest 不变。
