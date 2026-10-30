@@ -1020,3 +1020,49 @@ tmp/merge-release                              62 轮 · 181 tok/s · 缓存 99.
 | 汉堡中心 | 72 | 72 |
 | 标题中心 | — | 72 |
 | 工作区 chip 中心 | 72 | — |
+
+## 2026-10-30 · 正文区：横向边距 / 滚动收口 / 细滚轴 / 思考展开
+
+手机上一直是「正文滚到输入条背后」：DSH 把输入条做在滚动容器里
+（`sticky` 贴底、上沿渐隐到背景色），滚轴于是画到屏幕最底。
+这次把正文区按手机阅读重新收口，四处一起改。
+
+| 项 | 之前（原生） | 现在 |
+|---|---|---|
+| 正文左右留白 | 32px（`clearance 16 + 16`） | 16px |
+| 滚动容器底边 | 844（= 屏幕底） | 726（= 输入条上沿） |
+| 输入条座位 | `position: sticky` + 36px 渐隐 | `position: fixed`、纯黑 |
+| 滚轴宽度 | 5px | 3px |
+| 思考过程展开 | `max-height: 400px` 内部滚动 | 不限高（页面一根滚轴）+ 2px 左侧竖线、缩进 10px |
+
+做法：
+
+- 正文让出输入条高度：`margin-bottom: var(--dsh-composer-height)`。
+  这个变量是原生 `ResizeObserver` 写在滚动容器上的，跟输入框行数同步，不用自己量；
+- 输入条座位改成固定定位贴屏幕底，同时去掉「渐隐到 #151517 / #000」的灰带——正文已经不在它背后了。
+  这里必须是 `fixed` 而不是 `absolute`：切到「轨迹」页时滚动容器会因为 composer overlay
+  变成 `position: relative`，`absolute` 会被它缩小后的盒子接住，输入条浮到屏幕中间（实测顶在 608）；
+- 主题把 `--dsh-scrollbar-width: 5px` 挂在 `body` 上（不是 `:root`），
+  所以细滚轴的覆盖也要写在 `body`，写 `:root` 不生效（实测仍是 5px）；
+- 思考过程组（`O_Ebla_body`）解除限高、去掉 `fadeTop/fadeBottom` 的 mask，
+  改用 `border-left` 竖线 + `padding-left: 10px`：只加一条线和一个缩进，不加块级内边距；
+- 「回到底部」浮球（`EvIC1a_toBottomSlot`）的 sticky 偏移原本按
+  「输入条压在正文上」算（`composer + 16px`），正文收口后要改回 12px；
+- 「轨迹」页按「输入条浮在内容上」给列表留了 `composer + 16`（实测 134px）的底部空白，
+  收口后成了死空白，改成 16px。
+
+实测（390×844，headless Chrome + 真实会话，未手动注入 CSS，读的是插件自己那份）：
+
+```
+chat padding         16px 32px   → 16px
+scroll rect.bottom   844         → 726（= 座位 top）
+seat position        sticky      → fixed（top 726 / h 118，两个页签都是）
+scroll margin-bottom 0px         → 118px
+scrollbar            5px         → 3px（::-webkit-scrollbar 计算值 3px）
+O_Ebla_body          400px/auto  → none/visible，border-left 2px #ffffff29，padding-left 10px
+轨迹 tablePane pad    134px       → 16px
+```
+
+边界：`--dsh-composer-height` 在首帧由 `ResizeObserver` 补齐前用 152px 兜底，
+输入框行数变化时可能有一两帧的位移；规则只在 `data-content-phase="active"` 生效，
+空态（hero）仍走原来的居中布局。
