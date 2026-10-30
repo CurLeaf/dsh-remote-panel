@@ -80,3 +80,28 @@ test('前缀根路径不会越界', async () => {
 	await handleRequest(request({ url: API_PREFIX, headers: { [TOKEN_HEADER]: token } }), res, { token })
 	assert.equal(res.state.status, 404)
 })
+
+test('外壳自检上报后，/status 能读到', async () => {
+	const post = response()
+	// handleRequest 需要一个可读的 req 流：用它已有的 readJson 习惯，构造最小 body
+	const body = JSON.stringify({ missing: ['wSkVaW_'] })
+	const req = {
+		method: 'POST',
+		url: `${API_PREFIX}/shell`,
+		headers: { [TOKEN_HEADER]: token, 'content-type': 'application/json' },
+		async *[Symbol.asyncIterator]() {
+			yield Buffer.from(body)
+		},
+	}
+	await handleRequest(req, post, { token })
+	assert.equal(post.state.status, 200)
+	const posted = JSON.parse(post.state.body)
+	assert.equal(posted.ok, false)
+	assert.deepEqual(posted.missing, ['wSkVaW_'])
+
+	const status = response()
+	await handleRequest(request({ url: `${API_PREFIX}/status`, headers: { [TOKEN_HEADER]: token } }), status, { token })
+	const parsed = JSON.parse(status.state.body)
+	assert.equal(parsed.shell.ok, false)
+	assert.deepEqual(parsed.shell.missing, ['wSkVaW_'])
+})
