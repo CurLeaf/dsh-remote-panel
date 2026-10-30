@@ -862,3 +862,18 @@ body[data-ds-dark-theme] [class*="_bottomRow"] { background: #000 !important; }
 
 实测：空态与抽屉打开两种状态下，全页 `#151517` 残留数 **0**（修前各 1 处：`pI_x6G_bottomRow`）；
 输入条外圈像素为 `rgb(0,0,0)`，卡片仍是设计里的 `#2c2c2e`（那是输入框本身，保留对比）。
+
+## 2026-10-30 · 输入条内边距收紧
+
+用户反馈：手机端输入框内边距偏大。实测（390，空态）：
+
+| 元素 | 改前 | 改后 |
+|---|---|---|
+| 卡片总高 | **132px** | **118px** |
+| `_card` padding-top | 8px | 4px |
+| `_scroll` padding | 10px 14px 0 | 6px 12px 0 |
+| `_input` padding | 4px 8px 0 14px | 2px 6px 0 12px |
+| `_row`（按钮行） | 6px 10px 10px（高 50） | 2px 8px 8px（高 44） |
+| 圆角 | 26px | 24px |
+
+行高、字号（15px）没动，只收掉多余留白。
