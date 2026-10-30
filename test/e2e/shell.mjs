@@ -14,7 +14,26 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const url = process.env.DSH_E2E_URL
+import { execFileSync } from 'node:child_process'
+
+/** 没给 URL 时，尝试从 dsh-web 的 journal 里捞一个带令牌的本机地址（仅 Linux）。 */
+function detectUrl() {
+	const fromEnv = process.env.DSH_E2E_URL
+	if (fromEnv !== undefined && fromEnv !== '') return fromEnv
+	try {
+		const log = execFileSync('journalctl', ['--user', '-u', 'dsh-web', '-n', '80', '--no-pager', '-o', 'cat'], {
+			encoding: 'utf8',
+			timeout: 3000,
+		})
+		const token = log.match(/token=([A-Za-z0-9_-]+)/g)?.at(-1)?.slice('token='.length)
+		if (token !== undefined) return `http://127.0.0.1:3080/?token=${token}`
+	} catch {
+		/* 没有 journal 就算了 */
+	}
+	return undefined
+}
+
+const url = detectUrl()
 const candidates = [
 	process.env.CHROME_PATH,
 	'/usr/bin/google-chrome',
