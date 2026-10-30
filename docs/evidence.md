@@ -680,3 +680,20 @@ sidebar(drawer)   #1b1b1c
 | 抽屉 `.hHd-Xa_root` | `padding-top: 12px`（首个可见子项 `_regionArea` 顶到 12px） |
 
 实测（390）：顶栏 `padding-top:12px`、标题 top=12；抽屉 root pad=12，区域从 y=12 开始。
+
+## 2026-10-30 · 点「+」后不再自动聚焦输入框
+
+手机上点输入条的「+」（添加文件或调用指令）时，应用会把焦点交回输入框，键盘随即弹出来把刚打开的面板顶走。
+
+做法（`installComposerFocusGuard`）：
+
+- `pointerdown` 捕获阶段判断目标是否在 `.uV2eYG_add` 内，是则开一个 900ms 的窗口；
+  点别处立刻清窗口，不影响正常输入；
+- 窗口内 `.uV2eYG_input` 收到 `focusin` 就立即 `blur()`，并在下一帧再补一次（有的实现会二次 focus）。
+
+实测（用临时节点跑守卫逻辑，绕开无头浏览器不派发真实 focus 事件的坑）：
+
+| 场景 | 结果 |
+|---|---|
+| 点「+」后应用把焦点给输入框 | `activeElement` 不是输入框，blur 触发 1 次 |
+| 点空白处后再点输入框 | 正常聚焦，blur 0 次 |
