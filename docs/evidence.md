@@ -647,3 +647,15 @@ sidebar(drawer)   #1b1b1c
 
 刘海：APK 侧加 `windowLayoutInDisplayCutoutMode=shortEdges` + `setDecorFitsSystemWindows(false)`（v5），
 页面侧已经没有 `env(safe-area-inset-top)`，两边都铺满才能盖住切角区。
+
+## 2026-10-30 · APK 图标去掉双环
+
+桌面端官方图标是「黑鲸 + 青黄双环」，用户只要鲸鱼。改用 DSH 前端的 `favicon.svg`（纯黑鲸鱼单色标志，
+无环），渲染成 1024 宽后按边界裁切，再按比例合成：
+
+| 用途 | 画布 | 鲸鱼占比 |
+|---|---|---|
+| 传统 mipmap（48~192） | 白底 | 62% |
+| 自适应前景（108~432） | 透明底 | 52%（安全区内） |
+
+自适应背景仍是纯白（`@color/ic_launcher_background`）。versionCode 6 / 0.2.6，APK 63 KB。
