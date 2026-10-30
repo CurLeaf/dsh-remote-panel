@@ -904,3 +904,24 @@ body[data-ds-dark-theme] [class*="_bottomRow"] { background: #000 !important; }
 |---|---|---|---|
 | 空态 | 52px | 118px | 154px |
 | 15 行草稿 | 154px | 220px | 154px（框内滚动，scrollHeight 722） |
+
+## 2026-10-30 · 输入条下方统计排布（不挤在一起）
+
+现象：`.uV2eYG_dock` 里「58 轮 956 步 · 178 tok/s」「476M tok · 缓存命中 99.7%」「48%」挤成一团。
+
+排查：dock 是 `flex; gap:12px; flex-wrap:nowrap`，三颗胶囊实测 154 + 179 + 61 = 394px + 两个 12px 间距，
+远超 351px 的可用宽度 —— 不换行就只能互相压。
+
+还有一层坑：前两颗外面套着 `display: contents` 的 div，Chrome 里它不参与 flex 换行计算，
+只加 `flex-wrap: wrap` 会让每颗各占一行（实测 3 行 74px）。
+
+修法：
+
+```css
+.uV2eYG_dock { flex-wrap: wrap; justify-content: flex-start; column-gap: 14px; row-gap: 4px; }
+.uV2eYG_dock > div { display: flex; align-items: center; gap: 14px; } /* 把 contents 实体化 */
+[data-composer-stat="git-branch"] { display: none; }                    /* 手机上先收掉最不关键的一个 */
+```
+
+实测（390）：第一行「4 轮 53 步 · 188 tok/s」+「13.1M tok · 缓存命中 99%」并排（间距 14px），
+第二行是占比胶囊；不再互相挤压，也不再是一颗一行。
