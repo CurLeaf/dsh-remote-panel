@@ -729,3 +729,22 @@ DSH 打开工作区选择器会把焦点交给搜索框（`wsc-input`），关�
 padding 52px、高 92、chip 行 top 40。每个时机只写一次变量，无轮询、无重排循环。
 
 APK 版本 0.2.7（versionCode 7）。
+
+## 2026-10-30 · 修复：留白高度算错（物理像素当 dp 用）
+
+现象：装 0.2.7 后顶栏整排被推到屏幕 1/5 处，看着像「版面变形」。
+
+原因：`WindowInsets.getInsets()` 返回的是**物理像素**，而 CSS 里的 `px` 在 viewport 缩放后是 dp。
+2~3 倍屏上这个值直接放大了 2~3 倍（40dp 的切角 → 注入 88~120 "px"），顶栏 padding 被撑到一百多。
+
+改法：
+
+```java
+float density = getResources().getDisplayMetrics().density;
+int top = Math.max(0, Math.min(48, Math.round(topPx / density)));  // 换算成 dp，并设上限
+```
+
+顺手对齐了 chip 行：`top: calc(12px + var(--dsh-safe-top))` + `height: 40px`，
+实测汉堡与 chip 的纵向中心在 `var=0` 时都是 32、`var=40` 时都是 72。
+
+APK 0.2.8（versionCode 8）。

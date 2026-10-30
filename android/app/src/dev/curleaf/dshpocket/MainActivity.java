@@ -116,18 +116,24 @@ public class MainActivity extends Activity {
 	 */
 	private void pushSafeArea() {
 		if (web == null) return;
-		int top = 0;
+		// getInsets() 返回的是物理像素，CSS 里的 px 是 dp（viewport 缩放后），必须除以 density，
+		// 否则 2~3 倍屏上留白会变成两三倍高。
+		float density = getResources().getDisplayMetrics().density;
+		if (density <= 0f) density = 1f;
+		int topPx = 0;
 		if (Build.VERSION.SDK_INT >= 30) {
 			WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
 			if (insets != null) {
 				android.graphics.Insets merged =
 					insets.getInsets(WindowInsets.Type.displayCutout() | WindowInsets.Type.statusBars());
-				top = merged.top;
+				topPx = merged.top;
 			}
 		} else {
 			int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
-			if (id > 0) top = getResources().getDimensionPixelSize(id);
+			if (id > 0) topPx = getResources().getDimensionPixelSize(id);
 		}
+		// 上限 48px：再大就不像「切角高度」了，宁可少留也别把版面顶坏
+		int top = Math.max(0, Math.min(48, Math.round(topPx / density)));
 		final String js =
 			"document.documentElement.style.setProperty('--dsh-safe-top', '" + top + "px')";
 		web.post(() -> {
