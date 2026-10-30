@@ -573,3 +573,25 @@ TWA 又要域名做 Digital Asset Links，我们只有内网 IP。于是自己�
 
 实测：`aapt2 dump badging` 显示包名 `dev.curleaf.dshpocket`、label `DSH`、versionCode 1；
 `apksigner verify` 通过（debug keystore，CN=DSH Pocket）；APK 21,231 字节，sha256 `4ff6dd07…`。
+
+## 2026-10-30 · 底色不统一（空白页 #000 vs 会话页 #151517）
+
+现象：手机端默认是纯黑底，一开抽屉（或进会话）底色就变了。
+
+排查（390 视口逐元素取 computed style）：
+
+```
+body              #000   ← 我们之前强行刷的
+.wSkVaW_root      #151517 ← DSH 自己的深色面，没被覆盖
+uV2eYG_card       #141416
+sidebar(drawer)   #1b1b1c
+```
+
+所以空白页看到 #000、会话页看到 #151517、抽屉是 #1b1b1c，三者不一致；抽屉打开时遮罩
+`rgba(0,0,0,.35)` 压在 #151517 上变成 #0d0d0f，「底色变了」的感觉就是这么来的。
+
+修法：**不再强行覆写背景色**，统一交给 DSH 的深色面（#151517），只保留分隔/卡片细节。
+滚动渐隐也从渐到 #000 改成渐到 #151517，保持同色。
+
+实测（修完）：空态与会话态 `body`/`.wSkVaW_root` 都是 `rgb(21,21,23)`，抽屉仍是 `#1b1b1c`（原生抬升面），
+遮罩只做轻微压暗，不再是"从纯黑跳到深灰"。
