@@ -606,3 +606,24 @@ sidebar(drawer)   #1b1b1c
 | 空态 | `#000` | `#000` | — |
 | 会话 | `#000` | `#000` | — |
 | 抽屉打开 | — | **`#292929`** | `#000` |
+
+## 2026-10-30 · 去掉刘海预留 + 过渡动画
+
+用户口径：整体效果对了，但「动画生硬」，并且要去掉刘海屏预留。
+
+**刘海**：之前顶栏/抽屉/胶囊都吃 `env(safe-area-inset-top)`，全屏壳里会多出一条留白。
+现在整条链路改为固定值（`grep safe-area-inset-top` 为 0）：顶栏 52px、chip 行 `top:0`、抽屉 `padding-top:0`、
+离线胶囊 `top:6px`。底部 `env(safe-area-inset-bottom)` 保留（手势条还是要让）。
+
+**动画**：
+
+| 元素 | 之前 | 现在 |
+|---|---|---|
+| 抽屉遮罩 | `display:none` 切换 | 常驻 + `opacity` 0↔1，160ms `cubic-bezier(.2,.8,.2,1)` |
+| 抽屉 | 直接出现 | 入场 `translateX(-18px)+opacity .55` → 160ms |
+| 按钮（汉堡/新建/×/复制） | 无反馈 | `transition 120ms` + `:active scale(.94)` |
+| 离线胶囊 | 瞬现 | `dsh-pill-in 160ms` |
+
+`prefers-reduced-motion: reduce` 时全部关掉。
+
+实测：开抽屉 60ms 时遮罩 opacity 0.84、160ms 后 1、关闭后回到 0；顶栏 `padding-top: 11px`、高度 52px（无刘海留白）。
