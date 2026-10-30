@@ -840,3 +840,25 @@ DSH_E2E_URL="http://127.0.0.1:3080/?token=…" npm run e2e
 
 实测（390）：点会话后 150ms 强制 `.focus()` 输入条 → 立即被撤（activeElement 为空）；
 1.4s 后再聚焦 → 正常保留（`uV2eYG_input`）。
+
+## 2026-10-30 · 输入条外圈不再是 #151517 灰带
+
+现象：底部输入框外面那圈底色比纯黑亮一点，有色差。
+
+原因：DSH 给输入条座位（`.wSkVaW_composerSeat` / `.wSkVaW_composerHero`）加了一段
+`linear-gradient(rgba(0,0,0,0) 0, rgb(21,21,23) 36px)` 的渐隐——用来让消息从下面「淡出」。
+我们把页面刷成纯黑后，这条渐隐的终点还是 `#151517`，于是出现一条灰带；
+底部状态行（`_bottomRow`，轮次/token/缓存那行）也是 `#151517`。
+
+修法：把渐隐终点换成 `#000`，`_bottomRow` 底色改纯黑：
+
+```css
+body[data-ds-dark-theme] .wSkVaW_composerSeat,
+body[data-ds-dark-theme] .wSkVaW_composerHero {
+  background-image: linear-gradient(rgba(0,0,0,0) 0, #000 36px) !important;
+}
+body[data-ds-dark-theme] [class*="_bottomRow"] { background: #000 !important; }
+```
+
+实测：空态与抽屉打开两种状态下，全页 `#151517` 残留数 **0**（修前各 1 处：`pI_x6G_bottomRow`）；
+输入条外圈像素为 `rgb(0,0,0)`，卡片仍是设计里的 `#2c2c2e`（那是输入框本身，保留对比）。
