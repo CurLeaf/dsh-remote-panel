@@ -669,3 +669,14 @@ sidebar(drawer)   #1b1b1c
 
 改完已同步到 Caddy 的 `~/.dsh/remote-panel-app/`（`syncAppAssets` 下次启动也会覆盖成同一份），
 `/remote-panel/app/icon-*.png` 全部 200，manifest 不变。
+
+## 2026-10-30 · 顶部内边距（不吃刘海，但要留白）
+
+去掉 `env(safe-area-inset-top)` 之后顶栏和抽屉会贴屏幕边，改成固定 12px：
+
+| 位置 | 值 |
+|---|---|
+| 顶栏 `.wSkVaW_header` | `padding-top: 12px`（高度仍 52px；会话页含标签行 87px） |
+| 抽屉 `.hHd-Xa_root` | `padding-top: 12px`（首个可见子项 `_regionArea` 顶到 12px） |
+
+实测（390）：顶栏 `padding-top:12px`、标题 top=12；抽屉 root pad=12，区域从 y=12 开始。
