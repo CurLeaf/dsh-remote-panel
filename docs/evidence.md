@@ -711,3 +711,21 @@ DSH 打开工作区选择器会把焦点交给搜索框（`wsc-input`），关�
 
 实测（390）：打开选择器焦点在 `wsc-input`（预期，是它的搜索框）；关闭后 `document.activeElement` 是 `BODY`；
 手动聚焦输入条仍然正常（守则是被动撤焦，不拦用户主动点）。
+
+## 2026-10-30 · 顶部按刘海高度留白，但看不出是「刘海条」
+
+用户口径：空间要按刘海高度留，但样式上不能像一条刘海黑边。
+
+做法：**不在 JS 里轮询，也不信 `env()`**（WebView 里经常是 0）：
+
+1. 页面侧定义 CSS 变量 `:root { --dsh-safe-top: env(safe-area-inset-top, 0px) }`，
+   顶栏 `padding-top: calc(12px + var(--dsh-safe-top))`、抽屉同理、chip 行 `top: var(--dsh-safe-top)`、
+   离线胶囊 `6px + var(--dsh-safe-top)`；
+2. 壳（APK）在 `onPageCommitVisible` / `onPageFinished` / `onWindowFocusChanged` 三个时机，
+   把 `getRootWindowInsets()` 里 `displayCutout ∪ statusBars` 的 top 写进 `--dsh-safe-top`；
+3. 那块留白的底色就是页面自己的黑底（顶栏背景透明），所以看起来只是普通内边距。
+
+实测（390 无头）：默认 `--dsh-safe-top: 0px` → 顶栏 padding 12px、高 52；注入 40px →
+padding 52px、高 92、chip 行 top 40。每个时机只写一次变量，无轮询、无重排循环。
+
+APK 版本 0.2.7（versionCode 7）。

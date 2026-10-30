@@ -55,6 +55,19 @@ public class MainActivity extends Activity {
 		CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 		web.setWebViewClient(new WebViewClient() {
 			@Override
+			public void onPageCommitVisible(WebView view, String url) {
+				super.onPageCommitVisible(view, url);
+				// 首帧可见就先写一次，减少「加载完才下移」的跳动
+				pushSafeArea();
+			}
+
+			@Override
+			public void onPageFinished(WebView view, String url) {
+				super.onPageFinished(view, url);
+				pushSafeArea();
+			}
+
+			@Override
 			public void onReceivedSslError(WebView view, android.webkit.SslErrorHandler handler, android.net.http.SslError error) {
 				// 只对「我们自己的站点」放行：证书是 Caddy 内部 CA 签的，
 				// 有的 ROM 的 WebView 不认用户凭据里的根证书，硬拦会直接白屏。
@@ -89,7 +102,37 @@ public class MainActivity extends Activity {
 	@Override
 	public void onWindowFocusChanged(boolean focused) {
 		super.onWindowFocusChanged(focused);
-		if (focused) hideSystemBars();
+		if (focused) {
+			hideSystemBars();
+			pushSafeArea();
+		}
+	}
+
+	/**
+	 * 把真实的「切角 / 状态栏」高度写进 CSS 变量 --dsh-safe-top。
+	 *
+	 * 页面上那块留白就是页面自己的底色，看起来只是普通内边距，不会露出「刘海条」。
+	 * 之所以不从 JS 读 env(safe-area-inset-top)：WebView 里它经常是 0，读不到就必须靠原生侧补。
+	 */
+	private void pushSafeArea() {
+		if (web == null) return;
+		int top = 0;
+		if (Build.VERSION.SDK_INT >= 30) {
+			WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
+			if (insets != null) {
+				android.graphics.Insets merged =
+					insets.getInsets(WindowInsets.Type.displayCutout() | WindowInsets.Type.statusBars());
+				top = merged.top;
+			}
+		} else {
+			int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+			if (id > 0) top = getResources().getDimensionPixelSize(id);
+		}
+		final String js =
+			"document.documentElement.style.setProperty('--dsh-safe-top', '" + top + "px')";
+		web.post(() -> {
+			if (web != null) web.evaluateJavascript(js, null);
+		});
 	}
 
 	@Override
