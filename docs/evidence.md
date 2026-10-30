@@ -877,3 +877,21 @@ body[data-ds-dark-theme] [class*="_bottomRow"] { background: #000 !important; }
 | 圆角 | 26px | 24px |
 
 行高、字号（15px）没动，只收掉多余留白。
+
+## 2026-10-30 · 输入框加最大高度
+
+现象：长草稿把输入框一直撑高（15 行时 input 722px、卡片 402px），按钮行被顶到屏幕外。
+
+实测（390，真键盘输入 `Input.insertText`）：
+
+| | input 高 | 卡片高 | 可滚动 |
+|---|---|---|---|
+| 改前（15 行） | 722px | 402px | 否 |
+| 改后（15 行） | **132px** | **198px** | 是（scrollHeight 722，框内滚动） |
+| 空态 | 52px | 118px | — |
+
+```css
+.uV2eYG_input { max-height: min(132px, 30vh); overflow-y: auto; overscroll-behavior: contain; }
+```
+
+`30vh` 兜小屏；按钮行（`_row`）始终留在视口内。
