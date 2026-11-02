@@ -1,5 +1,22 @@
 import { diffLines, countChanges } from './diff.js'
 
+/** 已经有专用渲染（命令 / 文件 / 待办）的工具，不再重复进通用时间线。 */
+const RICH_TOOLS = new Set(['bash', 'read', 'edit', 'write', 'str_replace_editor', 'todo_write'])
+
+/** 给通用工具配一句话摘要：优先挑最有信息量的参数。 */
+export function summarizeArgs(name, args) {
+  const a = args ?? {}
+  const pick = [a.command, a.query, a.file_path, a.path, a.pattern, a.url, a.prompt, a.description, a.goal, a.task]
+  for (const value of pick) {
+    if (typeof value === 'string' && value.trim() !== '') return value.trim().replace(/\s+/g, ' ').slice(0, 80)
+  }
+  if (args && typeof args === 'object') {
+    const keys = Object.keys(args)
+    if (keys.length > 0) return `${keys.slice(0, 3).join(', ')}`
+  }
+  return name
+}
+
 /** 终端一次最多收多少行，避免把整份构建日志塞进内存。 */
 const MAX_CMD_LINES = 300
 
@@ -152,6 +169,9 @@ export function normalizeSession(session, rawEvents) {
       case 'tool/call': {
         const call = { id: d.callId, name: d.name, args: parseArgs(d.arguments), t: at, text: '' }
         calls.set(d.callId, call)
+        if (!RICH_TOOLS.has(d.name)) {
+          out.push({ type: 'tool.start', id: d.callId, name: d.name, summary: summarizeArgs(d.name, call.args), t: at })
+        }
         if (d.name === 'read') {
           const path = call.args.file_path
           if (typeof path === 'string') out.push({ type: 'file.read', path, t: at })
@@ -197,6 +217,18 @@ export function normalizeSession(session, rawEvents) {
         } else if (call.name === 'todo_write') {
           // 新版按 todo/write 事件走；旧日志只有工具调用，这里兜底
           applyTodos(call.args.todos, at)
+        } else {
+          // 其余工具（web_search / grep / subagent / mcp / job …）统一进时间线：
+          // 名字 + 一句话摘要 + 结果首行，手机上一眼看出「这一步调了什么」。
+          out.push({
+            type: 'tool.end',
+            id: call.id,
+            name: call.name,
+            ok: message.isError !== true,
+            dur: Math.max(0, at - call.t),
+            text: textOf(message).trim().slice(0, 220),
+            t: at,
+          })
         }
         break
       }

@@ -20,16 +20,19 @@ dsh plugin --profile web add dsh-remote-panel
 | H1 | 390px 下看顶部 | 左边 ☰、中间工作区 chip（点开是原生工作区菜单）、右边 ＋ 新建 | Console 有无 `[remote-panel] 未匹配到布局容器` |
 | H1 | 点 ＋ | 在「当前会话所在工作区 → 最近工作区」开一条空白对话 | `ctx.get('uiWorkspace')` 是否有值 |
 | H1 | 390px 下看底部 | **没有**三格底栏；输入条是一整块卡片，按钮行保留原生控件（+ / 权限 / GenUI / 模型 / 发送） | 元素面板搜 `.dsh-mobile-bar` |
-| H2 | 侧栏展开后 | 黑色浮层铺到底；工作区列表在面板入口之上 | 查 `[class*="_sidebarCol"]` 是否命中 |
-| H2 | 点抽屉外空白 | 抽屉滑出后收起，**全程不闪**（不能出现退场后又重播进场），且不误触下方正文 | 采样 `getAnimations()` 里 close 之后是否又出现 `dsh-drawer-in` |
-| H2 | 点会话行 / 面板行 | 选完抽屉自动收起（桌面不收起） | 是否 `matchMedia('(max-width:1023px)')` |
-| H2 | 打开抽屉 | 只有「工作区列表 + 工作区 Git + 余额/账号」；插件/自动化/命令面板/MCP/更多 不出现 | 抽屉里是否还能看到这五个 `aria-label` |
+| H2 | 点 ☰ | 往左翻到**会话列表**整页（不是弹一张 280px 抽屉），顶栏跟着整屏走 | `html[data-dsh-page]` 是否变成 `2` |
+| H2 | 会话列表页 | 铺满整屏、无圆角无投影无遮罩；只有「工作区列表 + 工作区 Git + 余额/账号」 | 展开态是否被强制成 `width:100vw`；`.dsh-mobile-scrim` 应该**不存在** |
+| H2 | 点会话行 / 面板行 | 自动翻回对话页（桌面不动） | `matchMedia('(max-width:1023px)')`；回落是否走 `pagerApi.go(1)` |
 | H2 | 点 chip 右侧的 × | 回到「选择工作区」空态（输入条禁用），× 自动隐藏；再点 chip 弹原生选择器 | `.dsh-mobile-clear-workspace` 的 `data-none` |
-| H2 | 主屏**左侧 32–120px** 往右滑 | 抽屉**跟手**推出来、遮罩同步变亮；松手过 42% 或快速甩才吸附到全开，否则弹回；竖划不触发 | 触点是否 `32 ≤ x ≤ 120`；`html.dsh-drawer-dragging/live/snap` 是否依次出现 |
-| H2 | 抽屉上往左滑 | 抽屉滑出后收起；正文 / 代码块的横向滚动不受影响 | `html.dsh-drawer-leave` 是否出现、`dsh-drawer-in/out` 关键帧是否还在 |
+| H2 | 对话页往右滑 | 非对话页从左边**整屏**推出来，三页同时 1:1 跟着手指（正文位移 = 手指位移） | `_centerCol` / `.dsh-page-console` 的内联 `translate3d` 是否同幅反向 |
+| H2 | 对话页往左滑 | 会话列表从右边整屏推出来；松手前侧栏才挂载，且第一帧就在屏外 | `html.dsh-pager-side`、`_sidebarCol` 的展开标记 |
+| H2 | 松手 | 过 50% 或快速甩落下一页，否则弹回；两端有橡皮筋（拉 280px 只走 ~110px） | `pagerSettle` 的投影/相邻页夹取 |
+| H2 | 非对话页按系统返回 | 先翻回对话（不退出页面）；再按才退出 | `history.state.dshPage` 是否只有一条守卫 |
+| H2 | 竖着滚正文 / 在代码块上横划 | 只滚动 / 只横滚，不会把屏拽走 | 判轴阈值与 `blockedScroll` |
 | H3 | 390px 正文 | 占满宽度 | `[class*="_frame"]` 的 `grid-template-columns` |
 | H3 | 空态 | 问候语居中、输入条贴底、整页纯黑 | `.uV2eYG_root` 是否 `position: fixed` |
-| H3 | 输入框 | 键盘弹出不被顶飞 | — |
+| H3 | 输入框 | 点输入条弹键盘，输入条浮到键盘上沿（不遮住正在打的字），正文仍然从卡片下面穿过、不被切成两层 | `--dsh-kb-inset` 是否等于键盘高度、座位是否还是 `position: sticky` |
+| H3 | 输入完拖着正文滚 | 手指一碰到正文键盘就收起、输入条回到贴底；点输入条自己（按钮/模型/发送）不收起 | `installComposerDismiss` 是否只在 `(pointer: coarse)` 下挂 |
 | H4 | 全局搜索 `dsh-remote-panel-shell` | 只有一份 `<style>` | — |
 | H5 | 1281px | 无汉堡、无新建、布局与原生一致（chip 回到底部 hero 行） | `@media (min-width:1024px)` 是否生效 |
 | H6 | iPhone：分享 → 添加到主屏幕 → 桌面图标打开 | 没有地址栏 / 工具栏，安全区不被状态栏压住 | head 里是否有 `apple-mobile-web-app-capable` 与 `apple-touch-icon` |
@@ -48,14 +51,15 @@ dsh plugin --profile web add dsh-remote-panel
   collapsed: !!document.querySelector('[class*="_collapsed"]'),
   hamburger: !!document.querySelector('.dsh-mobile-hamburger'),
   newChat: !!document.querySelector('.dsh-mobile-newchat'),
-  scrim: !!document.querySelector('.dsh-mobile-scrim'),
-  drawerOpen: document.documentElement.classList.contains('dsh-drawer-open'),
+  pager: !!document.querySelectorAll('.dsh-pager-seam').length,
+  page: document.documentElement.dataset.dshPage,
+  consolePage: !!document.querySelector('.dsh-page-console'),
   style: !!document.getElementById('dsh-remote-panel-shell'),
 })
 ```
 
-期望：`frame/sidebar/hamburger/newChat/scrim/style` 全为真；
-390px 下汉堡与新建可见，1281px 下两者 `display: none`。
+期望：`frame/sidebar/hamburger/newChat/pager/style` 全为真、`page === '1'`；
+390px 下汉堡与新建可见，1281px 下两者 `display: none`、`.dsh-page-console` 也是 `none`。
 
 ---
 
@@ -98,3 +102,17 @@ systemctl status easytier-dsh-remote --no-pager | head -5
 | 日期 | DSH 版本 | 结果 | 备注 |
 |---|---|---|---|
 | | | | |
+
+### 监看（执行处置台）
+
+| # | 场景 | 期望 | 看什么 |
+| --- | --- | --- | --- |
+| J1 | 抽屉 → 监看 → 会话页 | 一句「N 个在跑 · 共 M 个」，卡住/运行中分色，点一行切过去 | `.row-sub` 文案、`data-act="session"` |
+| J2 | 步骤展开 | `耗时 X` + 进度条 + `调用链（N）`，每行 `时间 · 名字 · 摘要 · 耗时` | `renderCallChain` 输出、`.bar > div` |
+| J3 | 运行中 >3 分钟 | 步骤头出现「卡住 X 分钟」，进度条转红 | `s.stale` |
+| J4 | 短语 chips | 点「继续」→ toast `已发送：继续`，会话里出现这条消息 | `session.prompt` 是否真的发出 |
+| J5 | 接管 | 点「接管」→ agent 当轮被取消；再点「释放」 | `session.cancel()` |
+| J6 | 手机批准（开） | 桌面触发审批 → 手机出现「等你批准」→ 批准后桌面继续 | `/remote-panel/api/pending`、`/approve` |
+| J7 | 标记待处理 | toast `已标记，桌面能看到`；桌面设置里出现该条 | `/relay/mark`、设置 → 手机断点 |
+| J8 | 后台待批 | 手机收到系统通知 | APK：原生通知；浏览器：PWA `Notification` |
+| J9 | 一键验收 | `npm run verify:live` 13 项全 PASS | 脚本输出 |

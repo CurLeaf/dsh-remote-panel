@@ -32,11 +32,21 @@ export class Store {
     this.raf = null
     this.live = false
     this.following = true
+    this.overview = null
+    this.currentSessionId = null
+    this.approvals = []
+    this.watching = []
   }
 
-  /** 接线真实会话：每次事件窗口变化都会推一份新的 (scenario, events)。 */
+  /** 接线真实会话：每次事件窗口变化都会推一份新的 (scenario, events)，外加会话总览。 */
   setLive(state) {
-    if (!state || !state.scenario) return
+    if (!state) return
+    if (state.overview) this.overview = state.overview
+    if (typeof state.currentId === 'string') this.currentSessionId = state.currentId
+    if (!state.scenario) {
+      this.emit()
+      return
+    }
     this.live = true
     this.scenario = state.scenario
     this.events = state.events

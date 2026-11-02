@@ -1249,3 +1249,355 @@ CDP 清 HTTP 缓存后  reload 2.9s
 - `settings-account` 一个插件内联了 3.1MB base64 引导图（gzip 后约 2.4MB，占 42%），
   想再砍首包只能等上游懒加载或本地打补丁（升级会被覆盖）；
 - 清 App 数据会同时清掉 Cookie、HTTP 缓存和 CacheStorage，这时仍然需要重新登录 + 重下。
+
+## 2026-11-02 · 「监看」入口消失：折叠器与手机壳互相抵消
+
+**现象**：手机（390×844）抽屉里看不到「监看」，也看不到「工作区 Git」。
+DOM 里两行都在（`aria-label` 齐全），但 `getComputedStyle(row).display === 'none'`，`getBoundingClientRect()` 全 0。
+
+**定位**（真实页面，`127.0.0.1:3080` + 390×844 模拟）：
+
+| 事实 | 证据 |
+| --- | --- |
+| 7:2 行都在 DOM，`nav.hHd-Xa_panelList` 本身 `display:flex`（height 0，因为子项全隐藏） | 逐祖先取 `getComputedStyle` |
+| 命中该行且带 `display` 的规则只有两条 | `.hHd-Xa_panelRow{display:flex}`（原生）+ `nav > button[aria-label="监看"]{display:none !important}` |
+| 后者来自 `dsh-shell-ui/sidebar-fold.css` | 其 `KEEP = ['plugins','schedules']`，其余 `sidebar.panellist` 行一律折叠进「更多」 |
+| 手机壳又把「更多」行收掉 | `SHELL_CSS` 里 `.hHd-Xa_panelRow[aria-label="更多"]{display:none !important}` |
+
+**结论**：折叠器把「监看」「工作区 Git」塞进「更多」，手机壳把「更多」收掉 —— 两边都以为自己是唯一负责人，结果入口彻底没有。
+
+**修复**（`lib/client.js`）：
+
+- `ConsolePanelIcon` 的 `<svg>` 加 `data-dsh-panel="pocket-console"` 标记；
+- `SHELL_CSS` 窄屏段补一条更高特异性的兜底：
+
+```css
+html body nav > button:has(svg[data-dsh-panel="pocket-console"]),
+html body nav > button[aria-label="监看"],
+html body nav > button[aria-label="工作区 Git"] { display: flex !important; }
+```
+
+`html body nav > button[...]`（0,1,4）压过折叠器（0,1,2），与样式插入顺序无关；`:has` 认图标标记，label 选择器只是老 WebView 兜底。
+
+**实测（390×844，注入同一段差量 CSS）**：`监看` 22,659 236×36、`工作区 Git` 22,697 236×36 均 `display:flex`，`更多` 仍为 none；
+点「监看」→ `html.dsh-console-open` + `.pc-host` 挂载，nav 标题「现在」、右下「接管」在、页签「现在/变更」，实况显示当前步骤与 02:07 计时。
+
+**生效条件**：客户端 bundle 在 `dsh web` 启动时打包（URL 带 `rev=`），改完必须重启一次 `dsh web`，手机上刷新即可。
+
+**顺带发现**：`dsh-todo-center` 在控制台报 `slot "shell.overlay" is not declared`，它的悬浮球/弹窗注册失败（与本条无关，待单独处理）。
+
+## 2026-11-02 · 从「监看」返回后整页黑屏
+
+**现象**：手机（390×844）点监看顶部「对话」返回，或按系统返回键退出监看后，页面变成纯黑——body 文本长度 0，React 树被卸掉，只剩插件注入的 `panelbar/scrim/stats-tray` 三个节点。
+
+**取证**（真实页面，返回瞬间抓 `Runtime.consoleAPICalled`）：
+
+```
+console.error  TypeError: dispose is not a function
+console.error  slot entry crashed in 'root': TypeError: dispose is not a function
+```
+
+**根因**：`console/app.js` 的 `mountConsole()` 返回的是 `{ store, dispose }`（chunk 里也是 `{store:a,dispose:…}`），
+而 `ConsolePanelHost` 的 effect 收尾写的是 `dispose()`——把一个对象当函数调用。
+宿主把 `root` 槽位判为「条目录崩溃」→ 整个 root 卸载 → 黑屏。不抛异常的对照组：
+从「工作区 Git」面板用 `dsh-mobile-panelback` 返回是正常的（body 文本 790），说明问题只出在监看 chunk 的收尾形状。
+
+**修复**（`lib/client.js`，`ConsolePanelHost`）：
+
+```js
+const handle = mounted; mounted = null
+if (handle === null) return
+try {
+  if (typeof handle === 'function') handle()          // 直接返回 disposer
+  else if (typeof handle.dispose === 'function') handle.dispose()  // 现在的 { store, dispose }
+} catch (error) { console.warn('[remote-panel] console dispose failed', error) }
+```
+
+新增两条回归测试（`test/client.contract.test.js`）：两种返回形状各一条，断言 cleanup 不抛且 `dispose` 恰好一次。
+测试总数 167：166 pass / 0 fail / 1 skipped。
+
+**实测（390×844，吃服务端当前 bundle，未注入任何补丁）**：
+
+| 步骤 | 结果 |
+| --- | --- |
+| 抽屉 | 「监看」`display:flex` 22,697 236×36；「插件」「更多」仍为 `none` |
+| 点开监看 | `dsh-console-open` 置位，实况 1 个文件 +5 −2 |
+| 切「变更」→「现在」 | 页签正常切换，无异常 |
+| 点「对话」返回 | 文本 522、`dsh-console-open` 清空、`.pc-host` 已卸载，**不再黑屏** |
+| 系统返回键退出 | 文本 495，同样正常 |
+
+**顺带更正**：客户端 bundle 不是只在 `dsh web` 启动时打包——改完 `lib/client.js` 后服务端按需重打（对比 `rev=` 前后的 bundle 已含新代码），所以这两处修复都**不需要重启 dsh web**。
+
+**仍未处理**：`dsh-todo-center` 一直报 `slot "shell.overlay" is not declared`，它的悬浮球/弹窗注册失败（与本条无关）。
+
+## 2026-11-02 · 手机键盘顶不起输入条 / 滚正文不收键盘
+
+**现象**（手机浏览器）：
+
+1. 点输入条打字，输入条不在键盘上方，被键盘盖住——「经常」是因为跟浏览器版本有关，不是每次都这样。
+2. 输入到一半用手指拖正文看历史消息，键盘不收起、输入条也不回到贴底高度。
+
+**根因**：
+
+- 贴底的输入条在 Android Chrome 108+ 上会被键盘盖住：默认（`interactive-widget=resizes-visual`）
+  只缩**视觉视口**，布局视口不动，`position: fixed/sticky` 的元素原地不动。
+- 第二条是原生行为：点空白处会 blur，但「按下即滑动」的手势不产生 click，浏览器不会替你撤焦点。
+
+**修复**（`lib/client.js`）：
+
+- 新增 `installKeyboardDock()`：`键盘高度 = innerHeight - (visualViewport.height + offsetTop)`，
+  写进 `html` 的 `--dsh-kb-inset`，并挂 `data-dsh-keyboard`。
+  `visualViewport.scale > 1.01`（捏合放大）时一律按 0——不然放大也会被当成键盘把输入条顶飞。
+- 新增 `installComposerDismiss()`：只在 `(pointer: coarse)` 下挂 `pointerdown`，
+  目标不在输入条里、也不在输入条自己的浮层（dialog/menu/listbox/tooltip/popover/dropdown/selectMenu/picker）里就 `blur`。
+  按下就撤，所以「按下即滑动」也能收键盘，不用等 click。
+
+**第一版踩的坑（同日回改）**：只把键盘高度接到「输入条座位 fixed + 正文 margin 让出座位高度」这条老链路上，
+屏幕中间于是出现一道明显的分层——正文被切在卡片上沿，卡片像另起一层。这条链路本来就是外壳早先为了
+「正文止于输入条上沿」加的，和「浮在上面的输入条」互相矛盾，已整条删除。
+
+**现在的布局（原生形态）**：DSH 的座位本来就是滚动容器里的 `position: sticky; bottom: 0` +
+「透明 → 底色」36px 渐隐，正文从它下面穿过去；滚到底时座位本身占位，最后一条消息自然停在卡片上方。
+外壳只补两件事：
+
+```css
+.wSkVaW_scrollBody { margin-bottom: var(--dsh-kb-inset, 0px); }   /* 滚动区收在键盘上沿 */
+html[data-dsh-keyboard] .wSkVaW_composerSeat { padding-bottom: 12px !important; }  /* 手势条被键盘盖住，别留白缝 */
+```
+
+删掉的旧链路：`scrollBody { margin-bottom: calc(composer + inset) }`、`composerSeat { position: fixed; background: …;
+background-image: none }`、`toBottomSlot { bottom: 12px }`、`_ledger { --dsh-trajectory-bottom-clearance: 16px }`。
+「回到底部」浮球和轨迹页留白都回到原生按「浮在内容上」算。
+
+**实测**（390×844，真实会话，本地外壳 + 伪造 `visualViewport`）：
+
+| | 座位 position | 滚动区（top→bottom） | 输入条卡片（top→bottom） | 底边距 |
+| --- | --- | --- | --- | --- |
+| 键盘前 | sticky | 87 → 844（757） | 726 → 832 | 0px |
+| 键盘 320 | sticky | 87 → **524**（437） | **406 → 512** | 320px |
+| 收起 | sticky | 87 → 844 | 726 → 832 | 0px |
+
+座位背景仍是 `linear-gradient(rgba(0,0,0,0) → #000 36px)`——正文从卡片下面穿过并被渐隐吃进黑底；
+滚到中段截图确认正文连续（不再有横向切断）。撤焦点：聚焦输入条后在正文里 `pointerdown` →
+`activeElement` 变 `body`（合成事件与 CDP 真触摸各验一次），点输入条内部 / `[role="menu"]` 不撤；
+`(pointer: fine)` 时不挂监听，桌面滚轮/点选行为不变。
+
+**测试**：`test/client.contract.test.js` 新增 5 条（键盘高度/归零/放大不误判、外点收键盘与三类例外、
+桌面不接管、apply 挂两条 effect、**不再出现「fixed 座位 + 正文让位」旧链路**），客户端契约测试 6 → 11 条，
+全仓 `npm test` 全绿（并行有别的改动落进来，看总数的意义不大，认这两个文件的条数）。
+
+**没覆盖**：真实软键盘（这台机器没有 Android 设备），所以 `checklist.md` 的 H22 先留 `[ ]`，等真机走一遍 `verify.md` H3 两行。
+
+## 2026-11-02 · 手机监看升级：M1 会话总览 / M2 调用链时间线
+
+**背景**：用户判定原「监看」是「只读重排」——只有一个当前会话、工具链路只有 bash/read/edit 三种、按钮多是本地记录。按四个里程碑改造。
+
+**M1（会话总览 + 待处理收件箱）**
+
+- 数据来源（实测形状）：`uiSession.sessionStatus.getSnapshot()` → `Map<id, { running, pendingInteraction, completionUnread }>`；
+  `sessions.list.getSnapshot().byId` → `{ id, title, displayTitle, updatedAt, cwd, running, retainedBy }`。
+- 新增 `console/overview.js`（纯函数）：排序按 等你处理 → 完成未读 → 卡住（>3 分钟无动作）→ 运行中 → 空闲，同级按 `updatedAt` 倒序；`pendingLabel()` 从 `title/label/kind/request.toolName` 抠一句人话。
+- `console/source.js` 增加 `select(id)`（手动切换监看目标）、`overviewNow()`，并订阅会话列表与状态源。
+- 监看新增「会话」页：一句 `N 个在跑 · 共 M 个`，分「待处理 / 全部会话」两组，点行切过去。
+- 390×844 实测：220 个会话，首屏「手机输入框键盘顶起问题 · 可能卡住 3 分钟前没有新动作」；点「手机输入框键盘顶起问题」→ 切到「现在」并读到该会话 2 步。
+
+**M2（调用链时间线 + 耗时/卡顿）**
+
+- `console/live.js`：`RICH_TOOLS`（bash/read/edit/write/str_replace_editor/todo_write）走原专用渲染，其余全部工具（web_search/grep/subagent/mcp/job…）转成 `tool.start`/`tool.end`，带 `summarizeArgs()` 一句话摘要。
+- `console/engine.js`：新增 `buildCallChain()`，把 `tool.* / cmd.* / file.edit / file.read` 按时间折成一条调用链；步骤上加 `elapsed`、`stale`（running 且 >3 分钟）、`facts.calls`。
+- `console/ui.js`：步骤头显示 `N 次调用`，展开后 `耗时 X` + 进度条（卡住/失败转红）+ `调用链（N）`（最近 8 条，摘要截断，`时间 · 名字 · 摘要 · 耗时/失败`），并去掉重复的 activity 流水。
+- 390×844 实测：「已完成 · 13 次调用 · exit 0 / 耗时 2 分 20 秒 / 调用链（13）」逐条 bash、read_image 与耗时；运行中的步骤显示「卡住 5 分 19 秒 · 61 次调用」。
+
+**测试**：新增 `test/overview.test.js`(6) 与 `test/timeline.test.js`(4)，全量 181 条：180 pass / 0 fail / 1 skipped。客户端 contract 的 inject 列表已同步为 `['slots','layout','sessions','uiSession']`。
+
+**截图**：`docs/live-mobile-sessions-m1.png`、`docs/live-mobile-timeline-m2.png`。
+
+## 2026-11-02 · M3 审批与干预：桥接实现（待重启验收）
+
+**约束（查证过，不是猜）**：DSH 的审批是 `approval/request` **waterfall**（`dsh-user-approval` 的 `ApprovalService.decide()` → `ctx.waterfall(..., "approval/request", req, () => "unavailable")`），
+答案只有 `allowed-once | rejected | cancelled | unavailable`。谁接了就必须给结果，所以「无条件拦截」会把桌面 UI 饿死。
+
+**设计：接管才拦（默认零影响）**
+
+- 新增 `lib/approval-bridge.js`（纯状态机，10 条测试）：
+  - `intercept(request, next)`：会话不在接管名单 → `return next()`，桌面照旧；
+  - 接管后挂起，`list()` 给手机看（toolName / reason / callId / ageMs），`decide(id, 'allowed-once'|'rejected')` 作答；
+  - 120 秒没人答 → `unavailable`（fail closed）；请求 signal abort → `cancelled`；插件卸载 `close()` 全部放成 unavailable，不把 turn 挂死。
+- 宿主路由（`lib/index.js`）：`GET /pending`（待批 + 接管名单）、`POST /approve`、`POST /watch`；沿用既有的 `x-dsh-remote-panel` 令牌鉴权。
+- 监听注册：`ctx.inject(['approval'], scope => scope.effect(() => scope.on('approval/request', (req, next) => approvals.intercept(req, next))))`。
+- 客户端（`console/` + `lib/client.js`）：监看「现在」页新增 **等你批准** 卡片（工具名 + 原因 + 批准这次 / 拒绝）、**手机批准 开/关** 开关、以及短语 chips（继续 / 先停下 / 只看不改 / 换个方案，走 `binding.session.prompt([{type:'text'}], 'queue')`）。
+- 待批 3 秒轮询；宿主没重启前路由 404 会被静默吞掉，不会报错。
+
+**当前状态（重要）**：宿主插件只在 `dsh web` 启动时装载。实测运行中的进程仍是旧代码：
+
+```
+GET /remote-panel/api/pending → 404 {"ok":false,"error":"no route: GET /pending"}
+```
+
+所以 M3 的「代码 + 单测」已完成（全量 191 条：190 pass / 0 fail / 1 skipped），**端到端审批验收要等一次 `dsh web` 重启**：重启后 `GET /pending` 应返回 `{ok:true,entries:[],watching:[]}`，再跑真机流程（桌面触发审批 → 手机批准/拒绝）。
+
+## 2026-11-02 · M4 断点接力 + 通知（代码完成，路由待重启）
+
+**断点接力（宿主侧本轮回写）**
+
+- 新增 `lib/relay.js`：`$DSH_HOME/remote-panel/relay.json`，原子写（tmp+rename，0600）+ 归一化（手改坏也不炸）；
+  `lastSeen` 记录「手机看到第几步」，`marks` 是「回去处理」列表（同会话同文案去重，最多 30 条）。
+- 路由：`GET /relay`、`POST /relay/seen`、`POST /relay/mark`、`POST /relay/unmark`。
+- **顺手修掉一个真 bug**：`loadRelay` 之前 `return { ...EMPTY }` 是浅拷贝，`EMPTY.marks` 被不同路径共享，
+  一次 `addMark` 会污染下一次读取（单测直接抓到，改成每次 `empty()` 造新对象）。
+
+**通知 + 手机侧入口**
+
+- `console/app.js`：待批数从少变多且页面在后台 → `new Notification(...)`（PWA / 安卓壳同一条路）；
+  没授权就静默跳过。
+- 监看「现在」页新增：**断点接力 → 标记待处理**、**完成/待批通知 → 开启通知**；点步骤会把「看到哪一步」上报。
+- 反馈改成**诚实版**：只有宿主返回 `ok:true` 才说「已标记/已批准」，否则提示「宿主还没重启」——
+  实测（390×844）现在点「标记待处理」得到 `标记没保存：宿主还没重启`，通知权限走 CDP 授权后得到 `通知已开`。
+
+**当前状态**：`GET /relay` 与 `GET /pending` 在运行中的进程里仍是 `404 no route`（宿主插件启动时装载），
+所以 M3 审批、M4 接力/通知的端到端验收都要等一次 `dsh web` 重启。测试全绿：198 条（197 pass / 1 skipped / 0 fail）。
+
+**未做（需要 Android 构建）**：APK 前台服务常驻通知。`android/` 里有 `build.sh`，也有 JDK + `~/Android/Sdk`，但本轮没构建验证，留作 M4 剩余项。
+
+## 2026-11-02 · M4 补齐：APK 前台服务 + 系统通知桥
+
+**构建链**：`android/build.sh` 原来把 build-tools 写死 34.0.0 / platform android-34，本机只有 36.0.0 / android-36。
+改成自动取最高版本后，手打 APK 恢复可用（不依赖 Gradle、不联网）：
+
+```sh
+ANDROID_HOME=$HOME/Android/Sdk ./android/build.sh   # → android/dsh-pocket.apk
+```
+
+**新增（Java，平台 API，不拉 AndroidX）**
+
+- `PocketNotify.java`：两个通知通道——`dsh-pocket-alerts`（HIGH，任务提醒）、`dsh-pocket-keepalive`（LOW，常驻）；
+  `post()` 带点击回 App 的 PendingIntent；`startKeepAlive()`；Android 13+ 的 `POST_NOTIFICATIONS` 申请与检查。
+- `KeepAliveService.java`：`startForeground(...)` + `START_STICKY`，让进程在后台活着，页面里的 SSE/轮询才能及时把「等你批准/跑完了」变成系统通知。
+- `MainActivity`：`addJavascriptInterface(..., "DSHPocket")` 暴露 `notify(title, body)` / `keepAlive()` / `canNotify()`；
+  onCreate 里建通道、申请通知权限、拉起前台服务。
+- 清单：`POST_NOTIFICATIONS`、`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_DATA_SYNC`，`<service android:name=".KeepAliveService" foregroundServiceType="dataSync">`；版本 0.3.3(13) → 0.3.4(14)。
+- 页面：`notify()` 先走 `window.DSHPocket.notify`（APK 路径），没有桥再退回 Web `Notification`（PWA 兜底）。
+
+**验证（构建级，无真机）**：`aapt2 dump xmltree` 能看到三条权限与 `service .KeepAliveService`；`dexdump` 能看到
+`Ldev/curleaf/dshpocket/{MainActivity,KeepAliveService,PocketNotify}`；`dsh-pocket.apk` 已覆盖到
+`~/.dsh/remote-panel-app/dsh.apk`（同一 sha256 `717351dc…`），手机「手机 App」卡片下载到的就是这份。
+
+**仍未做**：真机安装验收（本机没有可连的手机）。安装后应看到常驻「DSH 保持连接」通知，以及「等你批准 / 跑完了」的提醒。
+
+## 2026-11-02 · 找到「手机侧拿不到宿主服务」的真因（并修掉）
+
+**症状**：监看点「标记待处理」只弹「标记没保存」，网络面板里**根本没有** `/relay/mark` 请求；`/pending` 轮询也不发。
+
+**定位**：给 `ConsolePanelHost` 的根节点临时加 `data-has-approvals` / `data-has-ui-session` 两个标记，实机读出来都是 `false` ——
+说明 `ctx.slots.register({ name:'main', inject: () => ({ … approvals: approvalsApi }) })` 的 inject 结果**没有透传到组件 props**
+（`props.sessions` 也不在，只是 v1 的监看恰好只依赖 `props.onExit`，所以一直没暴露）。
+
+**修复**：apply() 时把服务记到模块级 `runtimeServices = { sessions, uiSession, approvals }`，
+`ConsolePanelHost` 挂载时优先用它（`runtimeServices.x ?? props.x`），不再依赖 slot inject 透传。
+
+**实测（390×844，未重启的进程）**：网络里开始出现 `GET /remote-panel/api/pending`（3 秒一轮）与 `POST /remote-panel/api/relay/mark`，
+因为宿主还是旧代码，两者都是 404 → 界面照旧提示「宿主还没重启」，但**链路本身已经打通**。
+
+**另外补了一条真正端到端的接线测试**（`test/approval-wiring.test.js`，4 条）：用假 cordis ctx 跑 `apply()`，
+断言 ① 它把 `approval/request` 挂到了桥上；② 没接管的会话走 `next()`；③ `POST /watch` 后 waterfall 请求挂起、
+`GET /pending` 能看到、`POST /approve` 放行后 Promise 解析为 `allowed-once`；④ 拒绝同理。
+为了能跑，`apply(ctx, options)` 加了测试缝（`token / syncAssets / refreshLoginPage` 可注入，不碰真实 home）。
+
+## 2026-11-02 · 桌面侧「手机断点」卡片
+
+- `settings.section`（远程访问）里新增 `RelayCard`：读 `GET /relay`，显示「手机看到：<会话标题> · 第 N 步」，
+  以及「回去处理」标记列表（每条带「处理掉」→ `POST /relay/unmark`）。
+- 宿主没重启时路由是 404，卡片显示 **「宿主还没重启：重启 dsh web 后这里才有数据」**，不装死、不报错。
+- 组件已加进 `components` 导出，契约测试的「每个面板组件浅渲染不抛错」覆盖到它；全量 202 条仍全绿。
+- 视觉验证与端到端验收一并留到重启之后（本轮 CDP 实例中途挂死，没强行重试）。
+
+## 2026-11-02 · 一键验收脚本 tools/verify-live.mjs
+
+重启后不用再手点，直接：
+
+```sh
+cd dsh-remote-panel && npm run verify:live
+```
+
+13 项逐条 PASS/FAIL：宿主 4 条（`/pending`、`/relay`、`/relay/mark|unmark`、`/watch`）+ 手机侧 9 条
+（能打开监看、手机批准开关、断点/通知入口、短语 chips、点标记真的落库、页面在轮询 `/pending`、
+通知权限、会话总览列表）。
+
+未重启时实测 **7/13**：手机侧 7 条全绿，6 条失败全部是宿主路由 404（同一个原因），
+说明「客户端链路已通、只差宿主装载」这件事现在有可复现的量化证据。
+
+## 2026-11-02 · 三屏横滑（H23，取代抽屉）
+
+被测环境：DSH `0.2.1-rc.3`，390×844 / DPR 2，Chrome headless + CDP 触摸事件（`Input.dispatchTouchEvent`）。
+
+截图：`live-mobile-pager-mid.png`（推到一半：两屏同时在动）、`live-mobile-pager-console.png`（落定在非对话页）。
+
+### 轨道（跟手 1:1）
+
+| 时刻 | `_centerCol` | `.dsh-page-console` | `html[data-dsh-page]` |
+|---|---|---|---|
+| 停稳在对话页 | （无内联位移） | `translate3d(-390px,0,0)` | `1` |
+| 右滑 100px（手指 200→300） | `translate3d(100px,0,0)` | `translate3d(-290px,0,0)` | `1`（未落定） |
+| 右滑松手（过 50%） | `translate3d(390px,0,0)` | `translate3d(0,0,0)` | `0` |
+| 回翻后 | （无内联位移） | `translate3d(-390px,0,0)` | `1` |
+
+结论：正文位移 = 手指位移；两页始终相差一个屏宽（同一根轨道），不是「一层浮在另一层上」。
+停稳后当前页会清掉内联位移——常驻 `translate3d` 会白占一个合成层。
+
+### 橡皮筋
+
+从非对话页（左端）往右拉 280px，视觉只走 **≈107px**（`rubber(280,390) = 111.7`），松手弹回，`data-dsh-page` 仍是 `0`。
+
+### 会话列表页
+
+`html.dsh-pager-side` + 展开态强制 `width:100vw` 后实测：`_sidebarCol` 宽 **390**（宿主给的是 280）、
+`border-radius: 0`、`box-shadow: none`；收起时节点不存在（`display:none`），不占内存。
+
+### 系统返回
+
+```
+boot            page=1  history.state=null
+点 ☰            page=2  history.state={"dshPage":true}   ← 只压一条守卫
+点「监看」       page=0  history.state={"dshPage":true}   ← 不追加，仍是同一条
+history.back()  page=1  history.state=null                ← 守卫弹掉，页面不退出
+```
+
+守卫条目用「当前状态 × 栈顶状态」推出来（不再记 `pushed` 布尔量）：中途被手势 / 点选 / 程序化跳转
+搅乱时，下一步会自己收敛，不会出现「翻页翻不回去」的死状态。
+
+### 桌面
+
+1281×900：`grid-template-columns: 280px 1000px 0px`（三列原样）、`html.className` 里没有 `dsh-pager`、
+三个页面都没有内联 `transform`、`.dsh-page-console` 计算值 `display:none`。
+
+## 2026-11-02 · 干预链路真机验证：「继续」chip 真的发进了会话
+
+**改结构**：把「待批 / 手机批准 / 短语 / 断点 / 通知」抽成 `renderQuickActions(store)`，「现在」和「空会话」
+（还没步骤的新会话）共用——之前没有步骤时只剩一句「还没有可看的执行」，等于没法开口。
+
+**实测（390×844）**：
+1. ＋ 新建会话 → 抽屉 → 监看 → 会话页 → 选这条会话（走空会话分支）；
+2. 点短语「继续」→ toast `已发送：继续`；
+3. 退回对话，会话里出现「继续」这条用户消息（抽屉里也长出一条「继续会话」）。
+
+这条证明 M3 的「补充指令」是真的写进会话（`binding.session.prompt([{type:'text'}], 'queue')`），
+不是本地假动作。加上之前验过的「接管 → cancel」，M3 目前只差**批准/拒绝**（要宿主重启才通）。
+
+**桌面「手机断点」卡片**也在真机上验过（设置 → 远程访问）：显示「宿主还没重启：重启 dsh web 后这里才有数据」
+＋「手机还没看过任何步骤」＋「没有『回去处理』的标记」——渲染正常、不装死。
+
+## 2026-11-02 · 外壳适配灯转绿：首页 hero 选择器改成后缀匹配
+
+**现象**：设置 → 远程访问 的「外壳适配」灯是红的，提示 `外壳挂点缺失：pXSMma_`。
+
+**查证**（390×844 真机读 DOM）：四个必检挂点里只有 `pXSMma_` 不见；`wSkVaW_ / uV2eYG_ / pI_x6G_` 都还在。
+`pXSMma_` 那组是**首页 hero**（鱼标/标题组/工作区 chip），DSH 侧换了 hash 前缀。
+
+**修法**：
+
+- 首页 hero 的 7 条规则从 `.pXSMma_headline / _fish / _fishHitbox / _titleGroup / _previewBadge / _workspace / _workspaceLabel`
+  改成**按后缀匹配** `[class*="_headline"]` 等——以后 DSH 再换 hash，这些样式不会静默失效；
+- 「外壳适配」的必检挂点收回到三个「任何页面都在」的：`wSkVaW_ / uV2eYG_ / pI_x6G_`（hero 只在首页，不该参与判定）。
+
+**实测**：控制台不再打印 `外壳挂点缺失`；`#dsh-remote-panel-shell` 存在；抽屉里仍只有「监看」一个面板行（说明外壳 CSS 继续生效）。
+测试 207 条：206 pass / 0 fail / 1 skipped。

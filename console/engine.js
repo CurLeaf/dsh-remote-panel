@@ -37,6 +37,7 @@ export function deriveState(scenario, allEvents, t, interventions = [], flags = 
   const byId = new Map(steps.map((s) => [s.id, s]))
   const files = new Map()
   const commands = new Map()
+  const toolCalls = new Map()
   const activity = []
   const notes = []
   let tests = null
@@ -138,6 +139,30 @@ export function deriveState(scenario, allEvents, t, interventions = [], flags = 
         touch(e)
         activity.push({ t: e.t, kind: 'artifact', text: '产出可验收结果', anchor: 'artifact' })
         break
+      case 'tool.start': {
+        const call = { id: e.id, name: e.name, summary: e.summary, t: e.t, endT: null, ok: null, dur: null, text: '' }
+        toolCalls.set(e.id, call)
+        activity.push({ t: e.t, kind: 'tool', text: `${e.name} · ${e.summary} · 运行中`, anchor: `tool-${e.id}` })
+        touch(e)
+        break
+      }
+      case 'tool.end': {
+        const call = toolCalls.get(e.id) ?? { id: e.id, name: e.name, summary: '', t: e.t, endT: null, ok: null, dur: null, text: '' }
+        call.endT = e.t
+        call.ok = e.ok
+        call.dur = e.dur ?? Math.max(0, e.t - call.t)
+        call.text = e.text ?? ''
+        toolCalls.set(e.id, call)
+        const brief = (call.text || '').split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? ''
+        activity.push({
+          t: e.t,
+          kind: 'tool',
+          text: `${e.name} · ${call.summary || ''} · ${call.ok ? '' : '失败 '}${fmtSec(call.dur)}${brief ? ` · ${brief.slice(0, 60)}` : ''}`.replace(' ·  · ', ' · '),
+          anchor: `tool-${e.id}`,
+        })
+        touch(e)
+        break
+      }
       default:
         break
     }
@@ -197,6 +222,12 @@ export function deriveState(scenario, allEvents, t, interventions = [], flags = 
       exit: ends.length ? ends[ends.length - 1].exit : null,
       tests: test ? { passed: test.passed, failed: test.failed } : null,
     }
+    // 调用次数、耗时与卡住标记：手机上直接看「第几步、调了几次、拖了多久」
+    s.facts.calls =
+      inStep.filter((e) => e.type === 'tool.start').length + inStep.filter((e) => e.type === 'cmd.start').length
+    s.elapsed = s.startT === null ? 0 : Math.max(0, (s.endT ?? t) - s.startT)
+    s.stale = s.status === 'running' && s.elapsed > SILENCE_ALERT
+    s.calls = buildCallChain(inStep)
   }
 
   // ---- 信号：推进还是打转 ----
@@ -339,3 +370,40 @@ export function attemptDiff(file) {
 }
 
 export { STATUS_TEXT }
+
+/** 把一段事件窗口按时间顺序折成「调用链」：通用工具、命令、文件改动/读取各一行。 */
+function buildCallChain(window) {
+  const chain = []
+  const byId = new Map()
+  const push = (entry) => {
+    chain.push(entry)
+    if (entry.id) byId.set(entry.id, entry)
+    return entry
+  }
+  for (const e of window) {
+    if (e.type === 'tool.start') {
+      push({ id: e.id, t: e.t, name: e.name, summary: e.summary, dur: null, ok: null, text: '' })
+    } else if (e.type === 'tool.end') {
+      const hit = byId.get(e.id)
+      if (hit) {
+        hit.dur = e.dur ?? Math.max(0, e.t - hit.t)
+        hit.ok = e.ok
+        hit.text = e.text ?? ''
+      }
+    } else if (e.type === 'cmd.start') {
+      push({ id: e.id, t: e.t, name: 'bash', summary: e.cmd, dur: null, ok: null, text: '' })
+    } else if (e.type === 'cmd.end') {
+      const hit = byId.get(e.id)
+      if (hit) {
+        hit.dur = e.dur ?? Math.max(0, e.t - hit.t)
+        hit.ok = e.exit === 0
+        hit.text = `exit ${e.exit}`
+      }
+    } else if (e.type === 'file.edit') {
+      push({ id: `${e.path}#${e.attempt ?? 0}`, t: e.t, name: 'edit', summary: e.path, dur: null, ok: true, text: `+${e.add} −${e.del}` })
+    } else if (e.type === 'file.read') {
+      push({ id: `read-${e.path}-${e.t}`, t: e.t, name: 'read', summary: e.path, dur: null, ok: true, text: '' })
+    }
+  }
+  return chain.sort((a, b) => a.t - b.t)
+}

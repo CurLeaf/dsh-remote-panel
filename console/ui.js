@@ -30,6 +30,7 @@ const ICONS = {
   skip: S('<path d="M6 5.4l7.4 6.6L6 18.6z"/><path d="M17 5v14"/>'),
   rerun: S('<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.5V10h-5.4"/>'),
   bookmark: S('<path d="M7 3.5h10v17l-5-3.6-5 3.6z"/>'),
+  list: S('<path d="M4.5 7h15M4.5 12h15M4.5 17h10"/>'),
 }
 
 // 每个对象可执行的动作：三档
@@ -159,9 +160,75 @@ export function mount(root, store, options = {}) {
         store.emit()
         break
       case 'nav': store.go(view); store.emit(); break
+      case 'approve':
+      case 'reject': {
+        const decision = act === 'approve' ? 'allowed-once' : 'rejected'
+        Promise.resolve(options.onApprove?.(id, decision))
+          .then((res) => store.toast(res?.ok === true ? (act === 'approve' ? '已批准' : '已拒绝') : '没送达：宿主还没重启', res?.ok === true ? 'ok' : 'mark'))
+          .catch(() => store.toast('没送达：宿主还没重启', 'mark'))
+          .finally(() => store.emit())
+        break
+      }
+      case 'watch': {
+        const on = !(store.watching ?? []).includes(store.currentSessionId)
+        Promise.resolve(options.onWatch?.(store.currentSessionId, on)).then(() => {
+          store.watching = on ? [...(store.watching ?? []), store.currentSessionId] : (store.watching ?? []).filter((x) => x !== store.currentSessionId)
+          store.emit()
+        }).catch(() => {})
+        break
+      }
+      case 'say': {
+        const text = t.dataset.text ?? ''
+        const ok = options.onSend?.(text) === true
+        store.toast(ok ? `已发送：${text}` : '发不出去：会话没接上', ok ? 'ok' : 'mark')
+        store.emit()
+        break
+      }
+      case 'session': {
+        if (typeof options.onSelectSession === 'function') options.onSelectSession(id)
+        store.ui.view = 'now'
+        store.emit()
+        break
+      }
       case 'open': store.openDetail(kind, id); store.emit(); break
       case 'back': store.back(); store.emit(); break
-      case 'step': store.toggleStep(id); store.emit(); break
+      case 'step': {
+        store.toggleStep(id)
+        const step = store.derive().steps.find((x) => x.id === id)
+        if (step) {
+          Promise.resolve(
+            options.onSeen?.({
+              sessionId: store.currentSessionId,
+              stepId: step.id,
+              index: step.index,
+              title: step.title,
+            }),
+          ).catch(() => {})
+        }
+        store.emit()
+        break
+      }
+      case 'mark': {
+        const step = store.derive().current
+        const text = step ? `第 ${step.index} 步：${step.title}` : '回去看看这个会话'
+        Promise.resolve(options.onMark?.(store.currentSessionId, text))
+          .then((res) => store.toast(res?.ok === true ? '已标记，桌面能看到' : '标记没保存：宿主还没重启', res?.ok === true ? 'ok' : 'mark'))
+          .catch(() => store.toast('标记没保存：宿主还没重启', 'mark'))
+          .finally(() => store.emit())
+        break
+      }
+      case 'notify': {
+        try {
+          Notification.requestPermission().then((state) => {
+            store.toast(state === 'granted' ? '通知已开' : '浏览器没给通知权限', state === 'granted' ? 'ok' : 'mark')
+            store.emit()
+          })
+        } catch {
+          store.toast('这个环境不支持通知', 'mark')
+          store.emit()
+        }
+        break
+      }
       case 'focus':
         store.ui.detail = null
         store.ui.view = anchor?.startsWith('file-') ? 'changes' : 'now'
@@ -303,7 +370,7 @@ export function mount(root, store, options = {}) {
 // ---------- 导航栏 ----------
 function renderNavbar(el, d, store) {
   const { detail, takeover, view } = store.ui
-  const tabName = { now: '现在', changes: '变更', accept: '验收' }[view] ?? '监看'
+  const tabName = { sessions: '会话', now: '现在', changes: '变更', accept: '验收' }[view] ?? '监看'
   const backLabel = detail ? (detail.kind === 'preview' ? '验收' : '变更') : '对话'
   const title = detail ? (detail.kind === 'preview' ? '结果预览' : baseName(detail.id)) : tabName
   const sig = [backLabel, title, takeover, Boolean(detail)].join('|')
@@ -326,7 +393,7 @@ function renderNavbar(el, d, store) {
 function renderTabs(el, d, store) {
   // 实时模式没有「接受」的服务端语义，别摆一个假按钮
   const tabs = store.live
-    ? [['now', '现在', 'gauge'], ['changes', '变更', 'doc']]
+    ? [['sessions', '会话', 'list'], ['now', '现在', 'gauge'], ['changes', '变更', 'doc']]
     : [['now', '现在', 'gauge'], ['changes', '变更', 'doc'], ['accept', '验收', 'check']]
   const sig = store.ui.view + '|' + tabs.map((t) => t[0]).join(',') + '|' + store.ui.acceptance.status
   if (el._sig === sig) return
@@ -346,6 +413,7 @@ function renderScreen(d, store) {
     if (ui.detail.kind === 'preview') return renderPreview()
     if (ui.detail.kind === 'file') return renderFileDetail(d, ui.detail.id, store)
   }
+  if (ui.view === 'sessions') return renderSessions(d, store)
   if (ui.view === 'now') {
     if (store.live && d.steps.length === 0) return renderLiveEmpty(d, store)
     return renderNow(d, store)
@@ -354,19 +422,118 @@ function renderScreen(d, store) {
   return renderAccept(d, store)
 }
 
+// ---------- 会话总览 ----------
+const LEVEL_ICON = { pending: ['warn', 'orange'], done: ['check', 'green'], stale: ['warn', 'red'], running: ['wave', 'blue'], idle: ['doc', 'gray'] }
+
+function agoText(ms) {
+  if (ms === null || ms === undefined) return ''
+  if (ms < 60e3) return '刚刚'
+  if (ms < 3600e3) return `${Math.round(ms / 60e3)} 分钟前`
+  if (ms < 86400e3) return `${Math.round(ms / 3600e3)} 小时前`
+  return `${Math.round(ms / 86400e3)} 天前`
+}
+
+function levelText(item) {
+  if (item.level === 'pending') return `等你处理 · ${item.pending ?? '待确认'}`
+  if (item.level === 'stale') return `可能卡住 · ${agoText(item.ageMs)}没有新动作`
+  if (item.level === 'done') return `已完成 · 未查看（${agoText(item.ageMs)}）`
+  if (item.level === 'running') return `运行中 · ${agoText(item.ageMs)}有动作`
+  return `空闲 · ${agoText(item.ageMs)}`
+}
+
+function renderSessions(d, store) {
+  const overview = store.overview
+  if (overview === null || overview === undefined) {
+    return `<div class="page"><h1>会话</h1><p>正在读取会话列表…</p></div>`
+  }
+  const { counts, inbox, sessions } = overview
+  const row = (item) => {
+    const [name, tone] = LEVEL_ICON[item.level] ?? LEVEL_ICON.idle
+    return `<button class="row" data-act="session" data-id="${esc(item.id)}">
+      <span class="row-icon ${tone}">${icon(name)}</span>
+      <div class="row-main">
+        <span class="row-title">${esc(item.title)}${item.current ? ' · 当前' : ''}</span>
+        <span class="row-sub">${esc(levelText(item))}</span>
+      </div>
+      <span class="chevron">${icon('chevron')}</span>
+    </button>`
+  }
+  const rest = sessions.filter((item) => item.level === 'running' || item.level === 'idle')
+  return `
+    <div class="page">
+      <h1>会话</h1>
+      <p>${counts.pending > 0 ? `${counts.pending} 个等你处理` : counts.running > 0 ? `${counts.running} 个在跑` : '都在闲着'} · 共 ${counts.total} 个</p>
+    </div>
+    ${inbox.length === 0 ? '' : `<div class="section-title">待处理</div><div class="group">${inbox.slice(0, 20).map(row).join('')}</div>`}
+    <div class="section-title">全部会话</div>
+    <div class="group">${rest.slice(0, 30).map(row).join('') || '<div class="empty">没有其它会话</div>'}</div>
+  `
+}
+
 // ---------- 现在 ----------
+/** 处置动作区：待批 / 手机批准开关 / 短语 / 断点 / 通知——「现在」和「空会话」共用。 */
+function renderQuickActions(store) {
+  const pending = store.approvals ?? []
+  const watching = (store.watching ?? []).includes(store.currentSessionId)
+  const PHRASES = ['继续', '先停下', '只看不改', '换个方案']
+  const approvalCard = pending.length === 0 ? '' : `<div class="section-title">等你批准（${pending.length}）</div>
+    <div class="group">${pending.map((p) => `
+      <div class="row static">
+        <span class="row-icon orange">${icon('warn')}</span>
+        <div class="row-main">
+          <span class="row-title">${esc(p.toolName)}${p.reason ? ` · ${esc(p.reason)}` : ''}</span>
+          <span class="row-sub">${esc(String(p.sessionId).replace(/^session-/, '').slice(0, 8))} · ${esc(agoText(p.ageMs))}</span>
+        </div>
+      </div>
+      <div class="row static" style="gap:14px">
+        <button class="link-btn" data-act="approve" data-id="${esc(p.id)}">批准这次</button>
+        <button class="link-btn" data-act="reject" data-id="${esc(p.id)}" style="color:var(--red)">拒绝</button>
+      </div>`).join('')}</div>`
+  return `${approvalCard}
+    <div class="group">
+      <div class="row static">
+        <span class="row-icon ${watching ? 'green' : 'gray'}">${icon('hand')}</span>
+        <div class="row-main">
+          <span class="row-title">手机批准：${watching ? '开' : '关'}</span>
+          <span class="row-sub">${watching ? '这个会话的审批会停下来等你在手机上点' : '默认关：审批照旧在桌面弹'}</span>
+        </div>
+        <button class="link-btn" data-act="watch">${watching ? '关闭' : '打开'}</button>
+      </div>
+    </div>
+    <div class="chips">${PHRASES.map((t) => `<button class="chip" data-act="say" data-text="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <div class="group">
+      <div class="row static">
+        <span class="row-icon blue">${icon('bookmark')}</span>
+        <div class="row-main">
+          <span class="row-title">断点接力</span>
+          <span class="row-sub">标记后，桌面「设置 → 远程访问」能看到你标的位置</span>
+        </div>
+        <button class="link-btn" data-act="mark">标记待处理</button>
+      </div>
+      <div class="row static">
+        <span class="row-icon gray">${icon('warn')}</span>
+        <div class="row-main">
+          <span class="row-title">完成/待批通知</span>
+          <span class="row-sub">页面在后台时弹系统通知（PWA / 安卓壳同一条路）</span>
+        </div>
+        <button class="link-btn" data-act="notify">开启通知</button>
+      </div>
+    </div>`
+}
+
 function renderNow(d, store) {
   const { ui } = store
   const step = d.current
   const warn = d.now.level === 'warn'
   const place = [d.task.branch, d.task.workdir.replace(/^.*\//, '')].filter(Boolean).join(' · ')
   const sub = ui.takeover ? '已接管 · agent 已暂停' : place || '等待会话'
-
+  const quick = renderQuickActions(store)
   return `
     <div class="page">
       <h1>现在</h1>
       <p>${esc(sub)}</p>
     </div>
+${quick}
 
     <div class="group status">
       <div class="row static">
@@ -425,6 +592,7 @@ function renderLiveEmpty(d, store) {
       <h1>现在</h1>
       <p>${esc(place || '等待会话')}</p>
     </div>
+    ${renderQuickActions(store)}
     <div class="group">
       <div class="row static">
         <span class="row-icon gray">${icon('wave')}</span>
@@ -436,14 +604,32 @@ function renderLiveEmpty(d, store) {
     </div>`
 }
 
+
+/** 调用链：一行一次调用，摘要截断，最多留最近 8 条。 */
+function renderCallChain(calls) {
+  const shown = calls.slice(-8)
+  const oneLine = (text) => String(text ?? '').replace(/\s+/g, ' ').trim()
+  const row = (c) => {
+    const head = `${c.name} · ${oneLine(c.summary).slice(0, 56)}`
+    const tail = c.dur == null ? '运行中' : `${fmtSec(c.dur)}${c.ok === false ? ' · 失败' : ''}`
+    return `<div class="step-act"><span class="step-act-t">${fmtClock(c.t)}</span><span class="step-act-x">${esc(head)} · ${esc(tail)}</span></div>`
+  }
+  const more = calls.length > shown.length ? `<div class="step-more">还有 ${calls.length - shown.length} 条更早的调用</div>` : ''
+  return `<div class="step-expect">调用链（${calls.length}）</div>${more}${shown.map(row).join('')}`
+}
+
 function renderStep(s, d, store) {
   const open = store.ui.openStep === s.id
   const f = s.facts ?? {}
   const acts = d.activity.filter((a) => a.t >= (s.startT ?? Infinity) && a.t <= (s.endT ?? Infinity) && a.kind !== 'step')
   const bits = [statusText(s)]
+  if (s.stale) bits.push(`卡住 ${fmtSec(s.elapsed)}`)
+  if (f.calls) bits.push(`${f.calls} 次调用`)
   if (f.files) bits.push(`${f.files} 个文件 +${f.add} −${f.del}`)
   if (f.exit != null) bits.push(`exit ${f.exit}`)
   if (f.tests) bits.push(`${f.tests.passed} 通过 / ${f.tests.failed} 失败`)
+  const total = Math.max(1, d.duration || 1)
+  const width = Math.max(2, Math.min(100, Math.round((s.elapsed ?? 0) / total * 100)))
 
   return `<div class="step ${s.status} ${open ? 'open' : ''}">
     <div class="step-head" data-act="step" data-id="${s.id}" id="step-${s.id}">
@@ -455,8 +641,11 @@ function renderStep(s, d, store) {
       <span class="step-chevron">${icon('chevron')}</span>
     </div>
     ${open ? `<div class="step-body">
+      ${s.startT === null ? '' : `<div class="step-act"><span class="step-act-x muted">耗时 ${fmtSec(s.elapsed ?? 0)}${s.stale ? ' · 已超过 3 分钟没有新动作' : ''}</span></div>
+      <div class="bar"><div class="${s.stale || s.status === 'failed' ? 'bar-del' : 'bar-add'}" style="width:${width}%"></div></div>`}
+      ${(s.calls ?? []).length ? renderCallChain(s.calls) : ''}
       ${s.expect ? `<div class="step-expect">预期：${esc(s.expect)}</div>` : ''}
-      ${acts.length ? acts.slice(-8).map((a) => `
+      ${(s.calls ?? []).length ? '' : acts.length ? acts.slice(-8).map((a) => `
         <div class="step-act ${a.target ? 'tappable' : ''}" ${a.target ? `data-act="open" data-kind="${a.target.kind}" data-id="${esc(a.target.id)}" data-long="${a.target.kind}"` : ''}>
           <span class="step-act-t">${fmtClock(a.t)}</span>
           <span class="step-act-x">${esc(a.text)}</span>

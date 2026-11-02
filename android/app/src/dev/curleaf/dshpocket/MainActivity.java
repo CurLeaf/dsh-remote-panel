@@ -48,6 +48,10 @@ public class MainActivity extends Activity {
 	@Override
 	protected void onCreate(Bundle state) {
 		super.onCreate(state);
+		// 通知 + 前台保活：页面在后台也能把「等你批准 / 跑完了」推成系统通知
+		PocketNotify.ensureChannels(this);
+		PocketNotify.requestNotificationPermission(this, 9001);
+		PocketNotify.startKeepAlive(this);
 		// 铺到刘海下面：WebView 默认会被切在安全区内，顶部留一条黑边
 		if (Build.VERSION.SDK_INT >= 28) {
 			android.view.WindowManager.LayoutParams attrs = getWindow().getAttributes();
@@ -71,6 +75,22 @@ public class MainActivity extends Activity {
 		settings.setMediaPlaybackRequiresUserGesture(false);
 		settings.setAllowFileAccess(false);
 		settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+		web.addJavascriptInterface(new Object() {
+			@android.webkit.JavascriptInterface
+			public void notify(String title, String body) {
+				runOnUiThread(() -> PocketNotify.post(MainActivity.this, title, body));
+			}
+
+			@android.webkit.JavascriptInterface
+			public void keepAlive() {
+				runOnUiThread(() -> PocketNotify.startKeepAlive(MainActivity.this));
+			}
+
+			@android.webkit.JavascriptInterface
+			public boolean canNotify() {
+				return PocketNotify.hasNotificationPermission(MainActivity.this);
+			}
+		}, "DSHPocket");
 		CookieManager.getInstance().setAcceptCookie(true);
 		CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 		web.setWebViewClient(new WebViewClient() {
