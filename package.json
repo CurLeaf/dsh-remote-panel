@@ -24,8 +24,6 @@
   "files": [
     "lib",
     "deploy",
-    "console",
-    "tools/build-console.mjs",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
