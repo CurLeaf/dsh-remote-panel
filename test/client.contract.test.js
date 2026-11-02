@@ -390,19 +390,29 @@ test('输入条浮在正文上方：不再走「fixed 座位 + 正文让位」�
 	assert.ok(source.includes('html[data-dsh-keyboard] .wSkVaW_composerSeat'), '键盘态要收掉 safe-bottom 的白缝')
 })
 
-// ---------------------------------------------------------------- 三屏翻页
+// ---------------------------------------------------------------- 手机抽屉
 
-test('翻页引擎带三页，非对话页是懒挂载的一整层', () => {
-	const exports = loadBundle().factory(fakeRequire)
-	assert.equal(exports.pager.pages, 3, '轨道必须是三页')
-	assert.equal(typeof exports.components.PagerSheet, 'function', '非对话页要作为一个组件暴露出来')
+test('抽屉取代整屏翻页：旧 pager 必须整体消失', () => {
 	const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
-	assert.equal(source.includes('installDrawerSwipe'), false, '旧的跟手抽屉实现必须整体删掉，不能两套手势并存')
-	assert.ok(source.includes("className: 'dsh-page-console'"), '非对话页要有自己的整屏层')
-	assert.ok(source.includes("'dsh-pager-seam'"), '页与页之间要有接缝')
+	const exports = loadBundle().factory(fakeRequire)
+	assert.equal(exports.pager, undefined, 'pager 导出必须删掉')
+	assert.equal(exports.components.PagerSheet, undefined, 'PagerSheet 必须删掉')
+	assert.equal(/dsh-pager|dsh-page-console|installPager/.test(source), false, '翻页轨道与接缝的残留都要清干净')
+	assert.ok(source.includes('data-qzsy-drawer'), '抽屉要靠自己打的结构标记定位')
+	assert.equal(source.includes('dsh-drawer-backdrop'), false, '整屏会话层不该再挂遮罩（浮层才需要）')
 })
 
-test('apply 只挂一条翻页 effect（旧抽屉那条必须消失）', () => {
+test('抽屉只用宿主稳定契约：toggleSidebar + data-sidebar-collapsed', () => {
+	const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+	assert.ok(source.includes('layout?.toggleSidebar?.()'), '开合必须走宿主的 layout API')
+	assert.ok(source.includes("'data-sidebar-collapsed'"), '折叠状态认宿主的属性，不认哈希类名')
+	assert.ok(source.includes("[data-shell-overlay]"), 'frame 用 data-shell-overlay 定位')
+	// 抽屉这条链路上不该再出现哈希类名
+	const drawerBlock = source.slice(source.indexOf('function installDrawer'), source.indexOf('function installBackGuard'))
+	assert.equal(/class\*=|_sidebarCol|_frame/.test(drawerBlock), false, '抽屉实现里不能再有哈希类名兜底')
+})
+
+test('apply 挂抽屉 + 返回守卫两条 effect，翻页那条消失', () => {
 	const exports = loadBundle().factory(fakeRequire)
 	const labels = []
 	const ctx = {
@@ -413,52 +423,26 @@ test('apply 只挂一条翻页 effect（旧抽屉那条必须消失）', () => {
 		effect: (_cleanup, label) => labels.push(label),
 	}
 	exports.apply(ctx)
-	assert.ok(labels.includes('remote-panel: pager'), '缺了 pager effect')
-	assert.equal(labels.includes('remote-panel: drawer swipe'), false, '旧抽屉手势的 effect 不该再挂')
+	assert.ok(labels.includes('remote-panel: drawer'), '缺了 drawer effect')
+	assert.ok(labels.includes('remote-panel: back guard'), '缺了返回守卫 effect')
+	assert.equal(labels.includes('remote-panel: pager'), false, 'pager effect 不该再挂')
 })
 
-test('橡皮筋：越界位移被压住，永远到不了一整屏', () => {
-	const { rubber, unrubber } = loadBundle().factory(fakeRequire).pager
-	const size = 390
-	assert.equal(rubber(0, size), 0)
-	// 拉出去 100px，视觉上只走一小半；拉得越狠越接近但永远小于一屏
-	const soft = rubber(100, size)
-	assert.ok(soft > 0 && soft < 60, `100px 的过冲应该压到 60px 以内，实际 ${soft}`)
-	assert.ok(rubber(1000, size) < size, '橡皮筋永远到不了整屏')
-	// 逆函数要能还原，否则「动画中段再抓住」会跳一下
-	for (const over of [1, 12, 60, 200, 900]) {
-		const visual = rubber(over, size)
-		assert.ok(Math.abs(unrubber(visual, size) - over) < 1e-6, `unrubber(${visual}) 应该还原成 ${over}`)
-	}
-	assert.equal(rubber(-5, size), 0, '反向过冲不参与')
-})
-
-test('clamp / unclamp 在界内是恒等，界外才压缩', () => {
-	const { clamp, unclamp } = loadBundle().factory(fakeRequire).pager
-	const size = 390
-	const pages = 3
-	assert.equal(clamp(size, size, pages), size)
-	assert.equal(clamp(2 * size, size, pages), 2 * size)
-	assert.ok(clamp(-40, size, pages) < 0 && clamp(-40, size, pages) > -40)
-	assert.ok(clamp(2 * size + 40, size, pages) > 2 * size)
-	assert.ok(Math.abs(unclamp(clamp(-123, size, pages), size, pages) + 123) < 1e-6)
-})
-
-test('落点：慢慢拖过一半才翻，轻甩一下就翻', () => {
-	const { settle } = loadBundle().factory(fakeRequire).pager
-	const size = 390
-	const pages = 3
-	// 从对话页（1）往右拖：拖到 49% 松手、没有速度 → 弹回
-	assert.equal(settle(size - 0.49 * size, 0, size, pages, 1), 1)
-	// 拖过 51% → 翻到非对话页
-	assert.equal(settle(size - 0.51 * size, 0, size, pages, 1), 0)
-	// 只拖了 15%，但甩得很快（轨道速度 -2000px/s，往左页走）→ 仍然翻过去
-	assert.equal(settle(size - 0.15 * size, -2000, size, pages, 1), 0)
-	// 一次手势最多翻一页：从中页狂甩也只到相邻页。
-	// 轨道速度为正 = 往右边那一页走（手指往左划），所以 +9000 落在会话列表、-9000 落在非对话
-	assert.equal(settle(size, 9000, size, pages, 1), 2, '往左划 → 右边那页')
-	assert.equal(settle(size, -9000, size, pages, 1), 0, '往右划 → 左边那页')
-	// 两端夹住，不会翻到不存在的页
-	assert.equal(settle(0, -9000, size, pages, 0), 0)
-	assert.equal(settle(2 * size, 9000, size, pages, 2), 2)
+test('手势：边缘右滑开、抽屉内左滑收、竖向滚动不误触', () => {
+	const { swipe } = loadBundle().factory(fakeRequire).drawer
+	// 左缘 28px 起手、横向 60px → 开
+	assert.equal(swipe({ x: 12, y: 300, edge: true, inDrawer: false, open: false }, { x: 72, y: 306 }), 'open')
+	// 正文中间起手同一个方向 → 不动（和正文横滑/代码块抢手势）
+	assert.equal(swipe({ x: 160, y: 300, edge: false, inDrawer: false, open: false }, { x: 300, y: 306 }), null)
+	// 抽屉开着、在里面往左划 → 收
+	assert.equal(swipe({ x: 180, y: 300, edge: false, inDrawer: true, open: true }, { x: 90, y: 305 }), 'close')
+	// 抽屉开着、往里（右）划 → 不动
+	assert.equal(swipe({ x: 90, y: 300, edge: false, inDrawer: true, open: true }, { x: 180, y: 305 }), null)
+	// 竖着滚列表：位移够了但方向不对 → 不动
+	assert.equal(swipe({ x: 12, y: 300, edge: true, inDrawer: false, open: false }, { x: 70, y: 420 }), null)
+	// 距离不够 → 不动
+	assert.equal(swipe({ x: 12, y: 300, edge: true, inDrawer: false, open: false }, { x: 40, y: 302 }), null)
+	// 数据不合法也不炸
+	assert.equal(swipe(null, { x: 10, y: 10 }), null)
+	assert.equal(swipe({ x: 1, y: 2 }, { x: Number.NaN, y: 3 }), null)
 })

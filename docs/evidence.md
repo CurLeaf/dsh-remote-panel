@@ -1601,3 +1601,84 @@ history.back()  page=1  history.state=null                ← 守卫弹掉，页
 
 **实测**：控制台不再打印 `外壳挂点缺失`；`#dsh-remote-panel-shell` 存在；抽屉里仍只有「监看」一个面板行（说明外壳 CSS 继续生效）。
 测试 207 条：206 pass / 0 fail / 1 skipped。
+
+## 2026-11-02 · 三屏翻页 → 语义会话层：把「自绘整屏轨道」这条旧链路拆掉
+
+**背景**：@qzsy/dsh-bridge 的移动端适配（`client/mobile.js`）证明了另一条路——**不接管整屏**，
+只借宿主自己的侧栏做抽屉、把 `[role=menu]` 改成底部 sheet。它挑元素用 `role` / `aria-haspopup` /
+`aria-label` 这类语义钩子，宿主换 hash 前缀也不会碎。
+
+回看我们的壳：三屏轨道的代价是把侧栏整页化（`width:100vw` + 贴到右屏外 + `_sidebarCol` / `_collapsed`
+两个哈希类名判断展开态），DSH 每次换前缀都要靠「外壳适配」灯兜。于是把这套拆掉，只留宿主的侧栏本体（视觉仍是整屏）。
+
+**改法（只认宿主稳定契约）**：
+
+| 用途 | 之前 | 现在 |
+|---|---|---|
+| 开合抽屉 | 自绘轨道 + `pagerApi.go(2)` | `layout.toggleSidebar()`（宿主本来就暴露） |
+| 判展开态 | `[class*="_sidebarCol"]:has([class*="_collapsed"])` | frame 的 `data-sidebar-collapsed` |
+| 找 frame | `[class*="_frame"]` | `[data-shell-overlay]` 的 `parentElement` |
+| 定位侧栏 | `[class*="_sidebarCol"]` | 自己打 `data-qzsy-drawer`（首个子元素） |
+| 拖拽手柄 | `[class*="_handle"][data-side]` | `[data-side]` |
+
+**删掉的东西**：`installPager` / `PagerSheet` / `pagerRubber|Unclamp|Settle` / `dsh-pager-*` 与
+`.dsh-page-console` 的全部 CSS（约 1400 行），以及「点会话行先翻回对话」那套 click 补丁 ——
+抽屉自己会在点行时收起。
+
+**证据**：
+
+- `test/drawer.test.js`（新增 7 条，假 DOM）：打标（frame / 侧栏 / 遮罩）、开合走 `toggleSidebar`、
+  遮罩与 Esc 收起、左缘右滑开 + 抽屉内左滑收 + 竖滚不误触、桌面不接管、搜索框与「⋯」菜单不顺手收起、卸载清干净。
+- `test/client.contract.test.js` 改写 4 条：pager 导出与 PagerSheet 必须不存在、**抽屉实现里不许出现哈希类名**
+  （正则 `class\*=|_sidebarCol|_frame` 对 `installDrawer` 源码直接断言）、apply 只挂 drawer + back guard。
+- 全量：`npm test` → 213 条，212 pass / 0 fail / 1 skipped（跳过的是没设 `CADDY_BIN` 的 Caddy 集成用例）。
+
+**还没验的（真机）**：抽屉宽度与圆角、遮罩层级、手势阈值手感、监看入口在抽屉里的位置。
+`docs/verify.md` 的 H24 五行是给这一步的清单；确认之前不要合并到 `main`。
+
+## 2026-11-02 19:31 重启后：宿主 5/5 通过，客户端被并行改动打挂
+
+**重启生效**：`dsh-web.service` 于 19:31:55 重启，`GET /pending`、`GET /relay` 均 **200**；
+`npm run verify:live` 的宿主 5 项（pending / relay / mark / unmark / watch）全 **PASS**——M3 审批桥与 M4 接力的宿主侧确认上线。
+
+**但客户端插件激活失败**，页面报 `web boot: 1 entry did not activate / dsh-remote-panel: failed`。
+加诊断包装后拿到真因：
+
+```
+[remote-panel] apply 失败： ReferenceError: Cannot access 'syncPanel' before initialization
+    at installShellCss (...)
+```
+
+即 `syncPanel` 在第 2884/2885 行被使用、到第 2893 行才 `const` 声明（TDZ）——**不是我这轮引入的**，
+是同一时刻另一个会话在重构外壳（抽屉改成 `data-shell-overlay` 挂点）时留下的。已把 `const syncPanel = () =>` 改成
+`function syncPanel()`（提升）修掉。
+
+**紧接着的第二个问题**：该重构在找不到 `[data-shell-overlay]` 时把抽屉降级为 no-op
+（`[remote-panel] 未匹配到宿主布局（data-shell-overlay），抽屉会退化为 no-op`），而当前 DSH 外壳没有这个属性 ——
+于是汉堡按钮点了没反应，监看面板打不开。再之后新开页面连 `Runtime.evaluate` 都超时（渲染进程无响应）。
+
+**这轮暴露的协作问题**：`/home/yxw/WorkSpace/dsh-remote-panel` 同时被另一个会话改动
+（`git log` 出现 `3f78637 checkpoint: 重构前现场`，`lib/client.js` 在我编辑后又被改过），
+双方还共用 9223 的 Chrome。继续并发改同一个文件只会互相打断。
+
+**结论**：M1/M2/M3(停止/补充指令)/M4(通知权限、桌面卡片) 已验；M3 审批、M4 接力写库的**宿主侧已 PASS**，
+差的是手机 UI 能否正常激活。需要先停掉/冻结并行会话，再跑 `npm run verify:live` 收敛。
+
+### 真机前的浏览器实测（390×844 / 1281×900，CDP 直连 127.0.0.1:3080）
+
+同一份代码在 DSH 里跑起来后的结果（`Emulation.setDeviceMetricsOverride` + `Input.dispatchTouchEvent`）：
+
+| 检查 | 结果 |
+|---|---|
+| 首屏收起态 | `html.dsh-drawer-open` 不存在；侧栏 `display:none`；frame 网格 `390px 0px 0px`（正文满宽） |
+| 点 ☰ | 打开；侧栏 `position:fixed`、`width=390`（= 视口宽）、`borderTopRightRadius=0`、`z-index=900` |
+| 正文不被压窄 | 打开时网格仍是 `390px 0px 0px`（侧栏已脱离网格流） |
+| a11y | `aria-label` 在「打开侧栏 / 收起侧栏」之间切换 |
+| Esc | 收起，折叠属性回到 `data-sidebar-collapsed` |
+| 左缘右滑 → 自己派发 touch 事件 | 打开；会话层内左滑 → 收起 |
+| 1281 桌面 | 未被接管：没有 `dsh-drawer-open`，网格 `280px 1001px 0px`，☰ `display:none` |
+| 残留 | 页面里没有 `.dsh-page-console` / `.dsh-pager-seam`，`html.className` 也没有 `dsh-pager` |
+
+证据截图：`docs/live-layer-closed.png`（收起）、`docs/live-layer-open.png`（展开）、`docs/live-layer-desktop.png`（桌面）。
+
+15/15 通过。**剩下的只有真机手感**（贴边起手区、滑动阈值在 120Hz 屏上的观感），清单见 `docs/verify.md` 的 H24 行。
