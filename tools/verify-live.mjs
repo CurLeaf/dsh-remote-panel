@@ -71,8 +71,11 @@ const send = (method, params = {}) =>
     ws.send(JSON.stringify({ id: next, method, params }))
   })
 const trySend = (method, params = {}) => send(method, params).catch((e) => ({ __err: String(e).slice(0, 80) }))
-const evaluate = async (expression) => {
-  const result = await trySend('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+const evaluate = async (expression, timeoutMs = 8000) => {
+  const call = trySend('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+  const timeout = new Promise((resolve) => setTimeout(() => resolve({ __timeout: true }), timeoutMs))
+  const result = await Promise.race([call, timeout])
+  if (result?.__timeout) return undefined
   return result.exceptionDetails ? { __err: String(result.exceptionDetails.exception?.description).slice(0, 200) } : result.result?.value
 }
 
@@ -82,7 +85,13 @@ await trySend('Runtime.enable')
 await trySend('Browser.grantPermissions', { origin: 'http://127.0.0.1:3080', permissions: ['notifications'] })
 await trySend('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true })
 await trySend('Page.navigate', { url: `http://127.0.0.1:3080/?token=${launch}` })
-await sleep(9500)
+// 重启后第一屏可能还在重打客户端包：等到应用外壳出现再继续（最多 25 秒）
+for (let wait = 0; wait < 50; wait += 1) {
+  const ready = await evaluate(`!!document.querySelector('[class*="_frame"]') && !!document.querySelector('#dsh-remote-panel-shell')`, 3000)
+  if (ready === true) break
+  await sleep(500)
+}
+await sleep(1200)
 
 let opened = false
 for (let attempt = 0; attempt < 4 && !opened; attempt += 1) {
