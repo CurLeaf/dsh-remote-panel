@@ -73,6 +73,18 @@ test('parseTokens 按端口过滤且保序', () => {
 	assert.equal(parseTokens(text).length, 2)
 })
 
+test('findTokens 的窗口按「进程可能活了多久」取（7 天 / 2 万行）', async () => {
+	let argv
+	await findTokens({
+		exec: async (command, args) => {
+			argv = args
+			return { stdout: '' }
+		},
+	})
+	assert.equal(argv[argv.indexOf('--since') + 1], '-7 days')
+	assert.equal(argv[argv.indexOf('-n') + 1], '20000')
+})
+
 test('findTokens 返回数组', async () => {
 	const all = await findTokens({ exec: async () => ({ stdout: sample }) })
 	assert.equal(all.length, 3)

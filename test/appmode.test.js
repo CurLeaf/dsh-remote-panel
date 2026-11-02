@@ -72,6 +72,11 @@ test('syncAppAssets 把清单与图标落到 Caddy 目录，且幂等', async ()
 		const manifest = JSON.parse(readFileSync(join(dir, 'manifest.webmanifest'), 'utf8'))
 		assert.equal(manifest.short_name, 'DSH')
 		assert.ok(statSync(join(dir, 'icon-192.png')).size > 0)
+		// Service Worker 也要一起落到 Caddy 目录（/sw.js 由它发出）
+		const sw = readFileSync(join(dir, 'sw.js'), 'utf8')
+		assert.match(sw, /dsh-static-v1/)
+		// SSE 入口不能被缓存层拦截
+		assert.match(sw, /'\/plugins\/events'/)
 		const before = statSync(join(dir, 'manifest.webmanifest')).mtimeMs
 		await new Promise((r) => setTimeout(r, 20))
 		syncAppAssets(dir)
@@ -98,6 +103,24 @@ test('令牌只出现在门禁之后的登录页，免鉴权的旧入口不再�
 		const landing = readFileSync(join(dir, 'go.html'), 'utf8')
 		assert.equal(landing.includes(token), false, '免鉴权页面不能出现令牌')
 		assert.equal(/dsh_gate|K7mQ|\?k=/.test(landing), false, '免鉴权页面也不能出现口令')
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+})
+
+test('登录页被临时设成只读时，新代码能摘掉只读位继续写入', async () => {
+	const { chmodSync, mkdtempSync, readFileSync, rmSync, statSync } = await import('node:fs')
+	const { tmpdir } = await import('node:os')
+	const { join } = await import('node:path')
+	const dir = mkdtempSync(join(tmpdir(), 'panel-login-ro-'))
+	try {
+		writeLoginPage(dir, 'tok_old_aaaaaaaaaaaaaaaa')
+		const file = join(dir, 'login.html')
+		// 热修场景：旧进程还会写页面，先把文件设成只读，挡住它
+		chmodSync(file, 0o444)
+		writeLoginPage(dir, 'tok_new_bbbbbbbbbbbbbbbb')
+		assert.ok(readFileSync(file, 'utf8').includes('tok_new_bbbbbbbbbbbbbbbb'), '只读位应被自动摘掉')
+		assert.ok((statSync(file).mode & 0o200) !== 0, '写完后恢复成可写，后续刷新不再失败')
 	} finally {
 		rmSync(dir, { recursive: true, force: true })
 	}

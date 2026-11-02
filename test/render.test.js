@@ -68,6 +68,17 @@ test('Caddyfile 含白名单、门禁与 healthz', () => {
 	assert.match(caddy, /reverse_proxy 127\.0\.0\.1:3080/)
 })
 
+test('Caddyfile：静态资源缓存头与 Service Worker 路由', () => {
+	const { files } = renderDeploy(base)
+	const caddy = files['~/.config/caddy/Caddyfile']
+	// /assets 是内容 hash 命名，可以一年不可变
+	assert.match(caddy, /handle \/assets\/\* \{[\s\S]*?immutable/)
+	// genui runtime 没有版本号，只能短缓存
+	assert.match(caddy, /handle \/dsh-genui\/runtime\.js \{[\s\S]*?max-age=3600/)
+	// SW 必须从站点根路径发出，且脚本本身不能缓存
+	assert.match(caddy, /handle \/sw\.js \{[\s\S]*?Cache-Control "no-cache"/)
+})
+
 test('env 文件不含 unit 级密钥泄漏路径', () => {
 	const { files } = renderDeploy(base)
 	const env = files['/etc/easytier/dsh-remote.env']

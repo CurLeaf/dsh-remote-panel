@@ -47,6 +47,24 @@ dsh plugin --profile web add dsh-remote-panel
 
 ---
 
+## 手机监看面板（1.0）
+
+窄屏（≤1023px）侧栏多一个「监看」入口，和对话并列：对话看意图，这一屏看执行。
+
+- **数据来自当前会话**：`todo/write` 的待办 → 步骤；`tool/result.meta.diffs` 的前后文本 → 文件改动（自己算行级 diff）；`bash` → 命令、输出、`[exit code: N]`、测试汇总。没有待办时退回 turn。
+- **实时跟随**：事件窗口一变就重算；拖动回放滑杆会暂停在那一刻，松手回到最新。
+- **主题跟随 DSH**（`body[data-ds-dark-theme]`），安全区用壳注入的 `--dsh-safe-*`。
+- **顶部让给控制台自己**：面板打开时宿主的移动端返回栏隐藏，由控制台的「对话 / 接管」负责；桌面不注册入口。
+- 动作面板带 `role="dialog"`，壳的抽屉右滑会让路。
+
+源码在 `console/`，构建：
+
+```bash
+npm run build:console   # 产物 lib/client.console.<hash>.js，哈希文件名会写回 lib/client.js
+```
+
+> 已知边界：验收页的「接受 / 打回」还没有服务端语义，实时模式下这两个页签不出现；真实会话也没有预览地址。
+
 ## 可选 HTTPS（内部 CA）
 
 默认是明文 HTTP。要装成 Android 独立应用，勾上向导里的「启用 HTTPS」重新部署即可，其余不变：
@@ -101,9 +119,18 @@ PWA「安装应用」在国行 Android 上装不成：WebAPK 打包依赖 Google
 # 产物：android/dsh-pocket.apk
 ```
 
-- 启动地址是 `/remote-panel/app/go.html`：插件每次启动时重写这一页，写入当前令牌，
-  先种门禁 Cookie 再跳首页，所以壳里不用登录；
+- 启动地址是 `/pair?k=口令`：先种门禁 Cookie，再由 `/remote-panel/login`（带当前令牌）跳首页，壳里不用登录；
+- **0.3.2 起**：主文档加载失败会自动重试 2 次，仍失败则显示带「重试」按钮的失败页；
+  401/403（登录/门禁失效）直接给「登录已过期」页，点一下就重新走登录链路，不用杀进程；
+- **0.3.3 起**：
+  - 软键盘改为壳内消费 `WindowInsets.Type.ime()`：`decorFitsSystemWindows(false)` 会让
+    `adjustResize` 失效，旧版键盘会直接盖住输入条；现在按帧跟随键盘动画给 WebView 加底部内边距，
+    并把页面 `--dsh-safe-bottom` 临时归零，避免键盘上方多出一条 48px 空白；
+  - 首帧前盖一层同色（`#151517`）占位页 +「正在连接…」，WebView 冷启动不再闪白；
+  - 401/403 先静默重走一次 `/pair`（`gateRetried` 只走一次），失败才落到「登录已过期」页；
 - `network_security_config` 显式信任 **user CA**，否则 WebView 不认装在用户凭据里的 Caddy 根证书；
+- 插件包与前端资源由 Service Worker 缓存（只缓存 `/plugins/*`、`/assets/*`，URL 自带版本），
+  WebView 的 HTTP 缓存被系统清掉也不用重下；`?nosw=1` 可一键注销；
 - 装好后的 APK 放在 `~/.dsh/remote-panel-app/dsh.apk`，手机直接访问
   `https://<ip>:8710/remote-panel/app/dsh.apk` 下载安装即可。
 
@@ -115,6 +142,10 @@ PWA「安装应用」在国行 Android 上装不成：WebAPK 打包依赖 Google
   （Fullscreen API，隐藏浏览器 UI）。
 - 配套优化：`viewport-fit=cover` + 安全区（刘海 / Home 指示条）、`interactive-widget=resizes-content`
   （键盘挤压布局而不是盖住输入条）、`theme-color`（深浅两套）、`overscroll-behavior: none`（无下拉刷新）。
+- 抽屉两种开法：点顶栏 ☰，或**在屏幕上任意位置往右滑**——跟手位移、抬手吸附到全开或弹回。
+  抽屉上任意位置往左滑收起。左右各 24px 让给系统返回手势；起手必须近乎纯横向
+  （横 20px 时竖移 ≤14px），所以竖着滚正文/列表时斜着划不会把抽屉拽出来。
+  手势只在 `≤1023px` 生效。
 
 ## 安全模型
 

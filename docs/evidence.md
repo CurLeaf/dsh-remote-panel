@@ -1066,3 +1066,186 @@ O_Ebla_body          400px/auto  → none/visible，border-left 2px #ffffff29，
 边界：`--dsh-composer-height` 在首帧由 `ResizeObserver` 补齐前用 152px 兜底，
 输入框行数变化时可能有一两帧的位移；规则只在 `data-content-phase="active"` 生效，
 空态（hero）仍走原来的居中布局。
+
+## 2026-10-30 · 会话行选中态：蓝底 + 常驻「⋯」菜单
+
+抽屉里「当前在哪个会话」只有一层 `--dsw-alias-interactive-bg-hover` 灰底，纯黑底上几乎看不出来；
+会话菜单又挂在 `rowActions` 里、只在 hover / 菜单打开时显形——触屏永远 hover 不到，
+等于手机上根本没有「置顶 / 重命名 / 分叉 / 归档 / 复制 Session ID」。
+
+| 项 | 之前（原生） | 现在 |
+|---|---|---|
+| 选中行底色 | `interactive-bg-hover`（白 8%） | `--dsw-alias-state-business-tertiary`：深色 `rgb(52, 65, 91)` / 浅色 `#e4edfd` |
+| 选中行文字 | `label-primary` | `--dsw-alias-state-business-primary`：深色 `rgb(122, 170, 255)` / 浅色 `#4176e6` |
+| 行尾「⋯」 | 仅 hover / `menuOpen` | **选中即常驻**，触摸目标 16 → 28px |
+| 时间 / 置顶针 | 常驻 | 选中行隐藏（行尾让给「⋯」） |
+| 归档 / 置顶 hover 按钮 | hover 露出 | 手机端隐藏（菜单里都有，不摆重复图标） |
+
+做法：
+
+- 选中态走原生就有的 `.YDXeBa_sessionRow.YDXeBa_selected`（`aria-selected` 同源），只覆盖颜色，
+  不改结构；色值全用主题令牌，浅色主题自动换成另一套（不需要写两遍）；
+- 「⋯」不是新按钮：原生 `Menu` 的锚点本来就在 `rowActions` 的第一个子节点
+  （`Menu` 渲染成 `<span>` 包住锚点），所以只把容器 `display:none` 改成选中时 `inline-flex`，
+  菜单内容仍是原生的 `sidebar.workspaces.session.menu.item` 槽位；
+- 行内只留「⋯」：`.YDXeBa_rowActions > :not(:first-child)` 隐藏 `row.action` 槽位的归档/置顶按钮；
+- 抽屉的「点会话后自动收起」要放行 `[class*="_rowActions"]`：点「⋯」不算选中会话，
+  否则抽屉一收、行卸载，菜单跟着消失。
+
+390×844 headless Chrome + 真实会话实测（读插件自己注入的那份 CSS）：
+
+```
+选中行背景      → rgb(52, 65, 91)
+选中行文字      → rgb(122, 170, 255)（title 同色）
+rowActions      → display:flex，第一个子节点是 Menu 锚点（aria-label「会话“启动”的操作」）
+第二个子节点    → row.action 槽位 display:none
+时间            → display:none
+点「⋯」后菜单   → 取消置顶 / 重命名 / 分叉会话 / 归档会话 / 复制 Session ID（5 项）
+抽屉            → html.dsh-drawer-open 仍为 true（菜单没被收起）
+```
+
+边界：`row.blank`（刚点「+」还没说话的草稿会话）原生不渲染 `rowActions`，选中时没有「⋯」——
+这类会话本来也没有置顶/分叉/归档的对象，保持一致。
+
+## 2026-10-30 · 工作区 Git 面板「进得去出不来」
+
+现象：手机抽屉里只留「工作区 Git」一个面板入口；点进去后面板整屏接管，
+会话顶栏随会话一起卸载，于是既没有 ☰ 也没有返回键。唯一还活着的固定件是「＋」，
+它还正好压在面板自己的「刷新」上。
+
+根因：☰ 不是全局按钮，注册在 `conversation.header.leading` 槽位，只在会话视图里存在；
+面板页是 `main` 槽位按 `activePanelId` 把整个会话换掉（`[data-slot="main.conversation"]` 消失）。
+
+做法：
+
+- 面板态订阅 `ctx.layout.panelInfo`（`getSnapshot().activePanelId !== null`），
+  同步成 `html.dsh-panel-open`；比在 DOM 里找「主区域不是会话」稳，也不用加重 MutationObserver
+  （正文流式输出时 class 观察器已经够忙了）；
+- `installShellCss` 里加一条固定顶栏 `.dsh-mobile-panelbar` + 返回键 `.dsh-mobile-panelback`，
+  点击 `layout.selectPanel(null)` 回 Conversation —— 不能写死面板 id（`git-badge` 是三分插件注册的）；
+- 面板页顶部让出 64px（`.gpb-page` 自带 30px 上边距），返回键落在这条留白里，不压标题；
+- 面板里隐藏「＋」：它固定定位在右上角，正好盖住面板的「刷新」，面板里也不该新建对话。
+
+实测（390×844，headless Chrome，真实 Git 面板）：
+
+```
+html class             → dsh-panel-open
+panelbar               → display:flex，高 52px
+返回键                  → 40×40 @ (10, 6)；点它后 [data-slot="main.conversation"] 回来、class 清空、☰ 复现
+gpb-page padding-top   → 64px；「工作区 Git」标题 top = 64
+dsh-mobile-newchat     → display:none（刷新按钮不再被盖）
+桌面 1281              → 无 panelbar（class 不置位）
+```
+
+系统返回键也一起接管了：面板打开时 push 一条 `{dshPanel:true}` 历史，返回先回对话。
+难点是「点面板行会先收抽屉」——抽屉自己那条历史要 popstate 落地后才能给面板压栈，
+否则会把刚压的面板条目弹掉；实现里用一个 `awaitingDrawerPop` 标记等这一拍：
+
+```
+chat            state=null        len=2
+drawer          state={dshDrawer} len=3
+panel           state={dshPanel}  len=3   ← 抽屉那条被 back + push 替换，不叠高
+系统返回(面板)   state=null        len=3，URL 仍在 /，main.conversation 回来
+返回键(面板)     state=null        同上，且不再触发一次多余的 history.back
+抽屉里点会话     state=null        抽屉收起、回会话、无残留条目
+```
+
+边界：返回键只在 ≤1023px 出现，桌面面板仍用原生侧栏切回；顶部那 52px 是外壳加的，
+以后暴露更多面板时要同样给顶部留白（目前只给 `.gpb-page` 写了规则）。
+
+## 2026-10-31 · 手机「打不开」：登录页拿不到令牌（全新登录 401）
+
+现象：手机端打不开。主机侧逐段查过都正常：
+
+```
+dsh-web       active，127.0.0.1:3080（10-30 14:45 起，22h）
+dsh-proxy     active，10.140.140.223:8710
+证书          叶子 08:35–20:35（12h，Caddy 08:35 自动续过），中间证书到 11-05
+EasyTier      10.140.140.3（HONOR 手机）在 peer 里，ping 164ms / 33% 丢包
+```
+
+但 Caddy 访问日志里，手机最后一条请求停在 **10-31 03:00:22**（`/plugins/events` 200，随后
+`context canceled`），之后没有任何来自 `.3` 的请求。也就是说：请求根本没到服务器。
+
+同时查出一个确定的服务端 bug：**手机壳的登录页里没有令牌**。
+
+```
+~/.dsh/remote-panel-app/login.html   468B   location.replace("/")
+全新客户端走一遍：/pair(200) → /remote-panel/login(200) → / (401)
+```
+
+根因在 `lib/pair.js` 的 journal 窗口：`--since '-6 hours' -n 5000`。
+DSH 只在**启动时**打印一次带令牌的地址，这个进程已经活了 22 小时，令牌行早就落在窗口外，
+`findTokens` 返回空 → 登录页被写成「无令牌的空跳转」→ 任何没有 DSH Cookie 的手机
+（新装 / 清过数据 / Cookie 失效）点开就是 401；而 `/pair` 接口在找不到令牌时还会
+用这个空页面**覆盖**掉本来可用的旧页面。
+
+热修（不用重启 DSH）：
+
+- 手动用验证通过的当前令牌重写 `login.html`，并 `chmod 444` —— 仍在运行的旧插件再调
+  `/remote-panel/api/pair` 时 `writeFileSync` 会 EACCES 被吞掉，覆盖不了；
+- 实测旧进程再调一次 `/pair`，文件 md5 不变；
+- 全新客户端再走：`/pair 200 → login 200 → /?token=… 303 → / 200` ✅
+- Caddyfile 给登录页加 `Cache-Control: no-store` 并 reload：手机不会拿缓存的旧页。
+
+代码修复（下次 DSH 重启生效）：
+
+- journal 窗口 6h/5000 → 7 天/20000（实测 90ms），进程活多久都能找到自己的令牌；
+- 启动时 30 次 × 2s 重试（开局可能还没打印监听地址），之后每 10 分钟对一次；
+- 只写**回环验证通过**的令牌，找不到就保持原样，不再用空页面覆盖；
+- `writeLoginPage` 遇到只读文件（本次热修留下的 444）自动 `chmod 644` 再写，重启后自愈。
+
+手机侧仍需确认：既然 03:00 后一个请求都没到 Caddy，先让手机浏览器打开
+`https://10.140.140.223:8710/healthz` —— 显示 `ok` 说明隧道通，重开 App 即可
+（旧壳的错误页不会自己重试）；打不开则是手机上的 EasyTier/VPN 没连上。
+
+## 2026-10-31 · 手机端加载优化：缓存头 + Service Worker + 壳重试
+
+目标：把「隔天/清缓存后 30 秒 loading plugins」压到几秒，并且加载失败时有路可走。
+
+### 1. 缓存头（Caddy）
+
+| 路径 | 之前 | 现在 |
+|---|---|---|
+| `/assets/*`（Vite 内容 hash） | 无 Cache-Control | `public, max-age=31536000, immutable` |
+| `/dsh-genui/runtime.js`（无版本号） | `no-cache` 且无 ETag → 每次启动重下 1.77MB | `public, max-age=3600`（单条，用 `header { defer }` 覆盖上游） |
+| `/plugins/*` combo | 已 immutable | 不变 |
+| `/sw.js` | — | `no-cache`，Caddy 从 app 目录直接发 |
+
+### 2. Service Worker（只缓存带版本的静态资源）
+
+- 新文件 `lib/assets/sw.js`，由 `syncAppAssets()` 落到 `~/.dsh/remote-panel-app/sw.js`，
+  Caddy 以 `/sw.js` 从站点根路径发出（scope 才能是 `/`）；
+- 只拦 `GET` + `/plugins/*`（排除 SSE `/plugins/events`）+ `/assets/*`，其余直通；
+- URL 自带 rev/hash，所以不做版本化 cache 名——换版本自然换 key，一个插件更新不会作废整包；
+- 首屏加载后页面把本次实际用到的 URL `postMessage` 给 SW 预取（此时已在 HTTP 缓存，不产生额外流量）；
+- 30 天清理；`?nosw=1` 注销并清缓存。
+
+390×844 headless Chrome 实测：
+
+```
+首次加载           3.8s，SW activated，缓存 7 条（2 个 combo + modules + assets）
+CDP 清 HTTP 缓存后  reload 2.9s
+  /plugins/?? 网络  0 次（全部 fromServiceWorker）
+  /assets/*    网络  0 次（全部 fromServiceWorker）
+  /plugins/events  未拦截（SSE 仍走网络）
+?nosw=1            注册清零、dsh-static-* 缓存清空
+```
+
+按手机那条 1.6Mbps 的 EasyTier 链路估算：原来 5.7MB 的插件包约 28 秒，
+命中 SW 后这部分变成 0 传输，只剩 HTML/API，预计 3–6 秒。
+
+### 3. WebView 壳重试（APK 0.3.2 / versionCode 12）
+
+- 主文档网络错误：自动重试 2 次（1.2s / 2.4s 退避），仍失败显示「DSH 暂时连不上 + 重试」；
+- 主文档 401/403：显示「登录已过期 + 重试」，点一下重走 `/pair` → 登录页 → 首页；
+- 5xx：自动重试 2 次后显示「服务暂时不可用 + 重试」；
+- 重试页是 `loadDataWithBaseURL` 的本地 HTML，按钮是普通 `<a href="/pair?k=…">`，不依赖 JS 桥；
+- 新 APK 已覆盖 `~/.dsh/remote-panel-app/dsh.apk`（sha256 bdea3bb5…）。
+
+### 4. 已知边界
+
+- 首次安装 / 清 App 数据仍要下完整包（5.7MB gzip）；这是包体决定的，缓存层不改变首次成本；
+- `settings-account` 一个插件内联了 3.1MB base64 引导图（gzip 后约 2.4MB，占 42%），
+  想再砍首包只能等上游懒加载或本地打补丁（升级会被覆盖）；
+- 清 App 数据会同时清掉 Cookie、HTTP 缓存和 CacheStorage，这时仍然需要重新登录 + 重下。

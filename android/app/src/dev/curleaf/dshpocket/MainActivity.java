@@ -3,9 +3,13 @@ package dev.curleaf.dshpocket;
 import android.app.Activity;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
+import android.view.WindowInsetsAnimation;
 import android.view.WindowInsetsController;
+import android.widget.FrameLayout;
+import android.widget.TextView;
 import android.webkit.CookieManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -26,7 +30,20 @@ public class MainActivity extends Activity {
 	/** 门禁口令：启动时先过 /pair 拿到 Cookie，再由 Caddy 发带令牌的跳转页。 */
 	private static final String ACCESS_KEY = "K7mQ2vT9pLxR4nW8sZbY3cHd";
 	private static final String START = SERVER + "/pair?k=" + ACCESS_KEY;
+	/** 主文档连续失败几次后放弃自动重试，改成带「重试」按钮的失败页 */
+	private static final int MAX_RETRIES = 2;
+	/** 页面底色（DSH 深色主题的 --dsh-boot-bg），加载期间不闪白 */
+	private static final int BG = 0xFF151517;
 	private WebView web;
+	private FrameLayout root;
+	private TextView splash;
+	private int retries = 0;
+	private boolean failed = false;
+	private boolean errorPage = false;
+	/** 401 自动重走一次 /pair 链路，防止无限循环 */
+	private boolean gateRetried = false;
+	/** 键盘是否处于弹出状态：用来避免 safe-bottom 与 IME 内边距叠加 */
+	private boolean keyboardShown = false;
 
 	@Override
 	protected void onCreate(Bundle state) {
@@ -46,6 +63,7 @@ public class MainActivity extends Activity {
 					| View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
 		}
 		web = new WebView(this);
+		web.setBackgroundColor(BG);
 		WebSettings settings = web.getSettings();
 		settings.setJavaScriptEnabled(true);
 		settings.setDomStorageEnabled(true);
@@ -57,16 +75,29 @@ public class MainActivity extends Activity {
 		CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 		web.setWebViewClient(new WebViewClient() {
 			@Override
+			public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+				super.onPageStarted(view, url, favicon);
+				failed = false;
+				// 只有真正的 http(s) 导航才离开失败页；loadData 的 about:blank 不算
+				if (url != null && url.startsWith("http")) errorPage = false;
+			}
+
+			@Override
 			public void onPageCommitVisible(WebView view, String url) {
 				super.onPageCommitVisible(view, url);
 				// 首帧可见就先写一次，减少「加载完才下移」的跳动
 				pushSafeArea();
+				hideSplash();
 			}
 
 			@Override
 			public void onPageFinished(WebView view, String url) {
 				super.onPageFinished(view, url);
 				pushSafeArea();
+				// 失败页 / 刚失败的那一页不清零，否则自动重试会变成死循环
+				if (errorPage || failed) return;
+				retries = 0;
+				gateRetried = false;
 			}
 
 			@Override
@@ -91,12 +122,55 @@ public class MainActivity extends Activity {
 
 			@Override
 			public void onReceivedError(WebView view, android.webkit.WebResourceRequest request, android.webkit.WebResourceError error) {
-				if (request != null && request.isForMainFrame()) {
-					showError("打不开 " + request.getUrl() + "\n" + error.getDescription());
+				if (request == null || !request.isForMainFrame()) return;
+				failed = true;
+				String detail = "网络不可达：" + error.getDescription();
+				if (retries < MAX_RETRIES) {
+					retries += 1;
+					retryLater(1200L * retries, detail);
+					return;
 				}
+				retries = 0;
+				showRetryPage("DSH 暂时连不上", detail);
+			}
+
+			@Override
+			public void onReceivedHttpError(WebView view, android.webkit.WebResourceRequest request, android.webkit.WebResourceResponse response) {
+				if (request == null || !request.isForMainFrame()) return;
+				int status = response == null ? 0 : response.getStatusCode();
+				// 401/403 = 门禁或 DSH 会话失效；5xx = 服务还没起来。其余 4xx 是页面自己的事
+				if (status != 401 && status != 403 && status < 500) return;
+				failed = true;
+				String detail = "HTTP " + status;
+				// 门禁 / 会话过期不必让用户点：静默重走一次 /pair（只一次，失败才落到错误页）
+				if ((status == 401 || status == 403) && !gateRetried) {
+					gateRetried = true;
+					retryLater(150L, detail + " -> re-pair");
+					return;
+				}
+				if (status >= 500 && retries < MAX_RETRIES) {
+					retries += 1;
+					retryLater(1200L * retries, detail);
+					return;
+				}
+				retries = 0;
+				showRetryPage(status == 401 || status == 403 ? "登录已过期" : "服务暂时不可用", detail);
 			}
 		});
-		setContentView(web);
+		root = new FrameLayout(this);
+		root.setBackgroundColor(BG);
+		root.addView(web, new FrameLayout.LayoutParams(
+			FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+		// 首帧之前盖一层同色占位：WebView 冷启动到页面出现之间本来是纯白
+		splash = new TextView(this);
+		splash.setText("正在连接…");
+		splash.setTextColor(0xFF8B8F96);
+		splash.setTextSize(15);
+		splash.setGravity(Gravity.CENTER);
+		root.addView(splash, new FrameLayout.LayoutParams(
+			FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+		setContentView(root);
+		installImeInsets();
 		hideSystemBars();
 		web.loadUrl(START);
 	}
@@ -107,7 +181,59 @@ public class MainActivity extends Activity {
 		if (focused) {
 			hideSystemBars();
 			pushSafeArea();
+			syncImeFromWindow();
 		}
+	}
+
+	/**
+	 * 软键盘：decorFitsSystemWindows=false 时系统不再替我们缩小窗口，
+	 * adjustResize 等于失效，键盘会直接盖住输入条。这里自己消费 IME insets，
+	 * 把它变成 WebView 的底部内边距——效果等价于 adjustResize，但保留全屏。
+	 */
+	private void installImeInsets() {
+		if (Build.VERSION.SDK_INT < 30) return; // 低版本走系统 adjustResize
+		getWindow().getDecorView().setOnApplyWindowInsetsListener((v, insets) -> {
+			applyImeBottom(insets.getInsets(WindowInsets.Type.ime()).bottom);
+			return insets;
+		});
+		// 键盘弹出/收起有动画，只在 onApply 里跳变会闪；按帧跟随
+		getWindow().getDecorView().setWindowInsetsAnimationCallback(
+			new WindowInsetsAnimation.Callback(WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+				@Override
+				public WindowInsets onProgress(WindowInsets insets, java.util.List<WindowInsetsAnimation> running) {
+					applyImeBottom(insets.getInsets(WindowInsets.Type.ime()).bottom);
+					return insets;
+				}
+			});
+	}
+
+	/** 兜底：某些 ROM 不派发 onApply，聚焦变化时从窗口 insets 再读一次 */
+	private void syncImeFromWindow() {
+		if (Build.VERSION.SDK_INT < 30 || web == null) return;
+		WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
+		if (insets != null) applyImeBottom(insets.getInsets(WindowInsets.Type.ime()).bottom);
+	}
+
+	private void applyImeBottom(int bottomPx) {
+		if (web == null) return;
+		int value = Math.max(0, bottomPx);
+		boolean shown = value > 0;
+		if (shown != keyboardShown) {
+			keyboardShown = shown;
+			if (shown) {
+				// 键盘自带底部空间，页面再留 safe-bottom 就会空出一条 48px 的缝
+				web.evaluateJavascript(
+					"document.documentElement.style.setProperty('--dsh-safe-bottom','0px')", null);
+			} else {
+				pushSafeArea();
+			}
+		}
+		if (web.getPaddingBottom() == value) return;
+		web.setPadding(web.getPaddingLeft(), web.getPaddingTop(), web.getPaddingRight(), value);
+	}
+
+	private void hideSplash() {
+		if (splash != null && splash.getVisibility() != View.GONE) splash.setVisibility(View.GONE);
 	}
 
 	/**
@@ -172,9 +298,43 @@ public class MainActivity extends Activity {
 		super.onDestroy();
 	}
 
+	/** 等一会儿再走一遍完整启动链路（/pair → 登录页 → 首页）。 */
+	private void retryLater(long delayMs, String reason) {
+		android.util.Log.w("dsh-pocket", "retry in " + delayMs + "ms: " + reason);
+		web.postDelayed(() -> {
+			if (web != null) web.loadUrl(START);
+		}, delayMs);
+	}
+
+	/**
+	 * 失败页：标题 + 原因 + 一个真正可点的「重试」。
+	 * 之前是 WebView 默认错误页，只有一个静态文字，用户只能杀进程重开。
+	 */
+	private void showRetryPage(String title, String detail) {
+		if (web == null) return;
+		hideSplash();
+		errorPage = true;
+		String html = "<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'>"
+			+ "<body style='margin:0;background:#000;color:#e6e6e6;font:15px/1.6 system-ui,sans-serif;"
+			+ "min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px;box-sizing:border-box'>"
+			+ "<div style='max-width:320px'>"
+			+ "<div style='font-size:18px;font-weight:600;margin-bottom:10px'>" + escape(title) + "</div>"
+			+ "<div style='color:#8b8f96;font-size:13px;white-space:pre-wrap;word-break:break-word'>" + escape(detail) + "</div>"
+			+ "<a href='" + escape(START) + "' style='display:inline-block;margin-top:24px;padding:12px 30px;"
+			+ "border-radius:999px;background:#4d7dfe;color:#fff;font-size:15px;text-decoration:none'>重试</a>"
+			+ "</div></body>";
+		web.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
+	}
+
+	private static String escape(String value) {
+		if (value == null) return "";
+		return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+	}
+
 	/** 出问题时不要留白屏：把错误显示在页面上，方便自查。 */
 	private void showError(String message) {
 		if (web == null) return;
+		hideSplash();
 		String html = "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
 			+ "<body style='background:#000;color:#ddd;font:14px system-ui;padding:24px;line-height:1.6'>"
 			+ "<h3 style='color:#f2b8b5'>DSH 打不开</h3><pre style='white-space:pre-wrap'>"

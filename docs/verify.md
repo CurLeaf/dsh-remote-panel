@@ -21,10 +21,12 @@ dsh plugin --profile web add dsh-remote-panel
 | H1 | 点 ＋ | 在「当前会话所在工作区 → 最近工作区」开一条空白对话 | `ctx.get('uiWorkspace')` 是否有值 |
 | H1 | 390px 下看底部 | **没有**三格底栏；输入条是一整块卡片，按钮行保留原生控件（+ / 权限 / GenUI / 模型 / 发送） | 元素面板搜 `.dsh-mobile-bar` |
 | H2 | 侧栏展开后 | 黑色浮层铺到底；工作区列表在面板入口之上 | 查 `[class*="_sidebarCol"]` 是否命中 |
-| H2 | 点抽屉外空白 | 抽屉收起，且不误触下方正文 | `.dsh-mobile-scrim` 是否存在、`html.dsh-drawer-open` 是否在切换 |
+| H2 | 点抽屉外空白 | 抽屉滑出后收起，**全程不闪**（不能出现退场后又重播进场），且不误触下方正文 | 采样 `getAnimations()` 里 close 之后是否又出现 `dsh-drawer-in` |
 | H2 | 点会话行 / 面板行 | 选完抽屉自动收起（桌面不收起） | 是否 `matchMedia('(max-width:1023px)')` |
 | H2 | 打开抽屉 | 只有「工作区列表 + 工作区 Git + 余额/账号」；插件/自动化/命令面板/MCP/更多 不出现 | 抽屉里是否还能看到这五个 `aria-label` |
 | H2 | 点 chip 右侧的 × | 回到「选择工作区」空态（输入条禁用），× 自动隐藏；再点 chip 弹原生选择器 | `.dsh-mobile-clear-workspace` 的 `data-none` |
+| H2 | 主屏**左侧 32–120px** 往右滑 | 抽屉**跟手**推出来、遮罩同步变亮；松手过 42% 或快速甩才吸附到全开，否则弹回；竖划不触发 | 触点是否 `32 ≤ x ≤ 120`；`html.dsh-drawer-dragging/live/snap` 是否依次出现 |
+| H2 | 抽屉上往左滑 | 抽屉滑出后收起；正文 / 代码块的横向滚动不受影响 | `html.dsh-drawer-leave` 是否出现、`dsh-drawer-in/out` 关键帧是否还在 |
 | H3 | 390px 正文 | 占满宽度 | `[class*="_frame"]` 的 `grid-template-columns` |
 | H3 | 空态 | 问候语居中、输入条贴底、整页纯黑 | `.uV2eYG_root` 是否 `position: fixed` |
 | H3 | 输入框 | 键盘弹出不被顶飞 | — |

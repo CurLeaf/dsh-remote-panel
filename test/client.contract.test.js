@@ -49,7 +49,7 @@ test('bundle 以包名装载', () => {
 
 test('factory 返回 { inject, apply }', () => {
 	const exports = loadBundle().factory(fakeRequire)
-	assert.deepEqual(Array.from(exports.inject), ['slots', 'layout'])
+	assert.deepEqual(Array.from(exports.inject), ['slots', 'layout', 'sessions'])
 	assert.equal(typeof exports.apply, 'function')
 })
 
@@ -72,8 +72,10 @@ test('apply 注册设置分区与移动端外壳插槽', () => {
 	const byName = new Map(registrations.map((entry) => [entry.registration.name, entry]))
 	assert.deepEqual([...byName.keys()].sort(), [
 		'conversation.header.leading',
+		'main',
 		'settings.section',
 		'shell.overlay',
+		'sidebar.panellist',
 	])
 
 	const section = byName.get('settings.section')
@@ -83,6 +85,13 @@ test('apply 注册设置分区与移动端外壳插槽', () => {
 
 	assert.equal(byName.get('shell.overlay').registration.id, 'remote-panel.new-chat')
 	assert.equal(byName.get('conversation.header.leading').registration.id, 'remote-panel.hamburger')
+
+	// 监看面板：main 的 key 必须和侧栏入口的 id 一致，否则点了没反应
+	const main = byName.get('main')
+	assert.equal(main.registration.key, 'pocket-console')
+	const panellist = byName.get('sidebar.panellist')
+	assert.equal(panellist.registration.id, 'pocket-console')
+	assert.equal(panellist.registration.label(), '监看')
 })
 
 test('每个面板组件浅渲染都不抛错', () => {

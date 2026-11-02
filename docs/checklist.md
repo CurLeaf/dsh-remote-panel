@@ -90,12 +90,19 @@
 - [x] H14 图片/附件（图 1200×900 → 314、点击看原图；三张附件卡在 383px 行内不溢出）
 - [x] H15 设置弹窗手机布局（导航改顶部横滑标签条；弹窗宽 342 → 374、内容列 154 → 374；内容区独立滚动 + 安全区）
 - [x] H16 长会话滚动（`content-visibility:auto` + `contain-intrinsic-size:auto 320px`；36 个 markdown 块生效；滚动容器 `overscroll-behavior:contain`）
+- [x] H17 会话行选中态（蓝底 + 蓝字走主题令牌；选中行尾常驻「⋯」打开原生会话菜单：置顶/取消置顶、重命名、分叉、归档、复制 Session ID）
+- [x] H18 面板页返回（工作区 Git 整屏时补固定顶栏 + 返回键，点一下回到 Conversation；系统返回键同样先回对话、不退出页面；面板里收掉会压住「刷新」的「＋」）
+- [x] H19 壳加载失败重试（主文档网络错误自动重试 2 次；仍失败显示带「重试」按钮的失败页；401/403 直接给「登录已过期」页；APK 0.3.2 / versionCode 12）
+- [x] H20 壳软键盘与首屏（`decorFitsSystemWindows(false)` 下 `adjustResize` 失效，改为自己消费 IME insets 并按键盘动画逐帧调整 WebView 底部内边距；键盘态把 `--dsh-safe-bottom` 归零；首帧前同色占位页 +「正在连接…」；401/403 静默重走一次 `/pair`；APK 0.3.3 / versionCode 13）
+- [x] H21 跟手横滑抽屉（热区 32–120px：外侧 24px 让给系统返回，内侧留给正文横滚；判轴后 preventDefault 抢滚动、逐帧写内联 transform，抬手按 42% 比例或 0.5px/ms 速度吸附；收起复用 leave 关键帧；e2e 用 CDP 触摸事件覆盖 13 条正反例，含「位移 = 手指位移」）
 
 ## L. 可靠性
 
 - [x] L1 证书自检（SAN + 剩余 >2h；`/probe.cert`、`/doctor` 的 `tls.cert`、`/status.tls`）
 - [x] L2 面板展示证书（运行状态多一盏「证书 10.5h」灯；不健康时出红色告警行；doctor 行优先显示 label）
 - [x] L3 断线重连提示（每 10s 探活 `/status`，连续两次失败弹顶部胶囊；恢复即消失）
+- [x] L4 手机登录页令牌刷新（journal 窗口 6h → 7d、2 万行；启动重试 30×2s + 每 10 分钟刷新；只写回环验证通过的令牌；只读文件自愈；登录页 `Cache-Control: no-store`）
+- [x] L5 静态资源缓存（Service Worker 缓存 `/plugins/*`、`/assets/*`，URL 自带 rev/hash；清 HTTP 缓存后 0 次网络请求；`?nosw=1` 注销；Caddy 给 `/assets/*` immutable、genui runtime 1h、`/sw.js` no-cache）
 
 ## I. 安全默认
 

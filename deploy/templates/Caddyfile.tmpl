@@ -64,9 +64,34 @@
 		handle @paired {
 			# 带令牌的跳转页：必须过了门禁才能拿
 			handle /remote-panel/login* {
+				# 登录页里的令牌每次进程重启都会变：绝不能让手机用缓存的旧页
+				header Cache-Control "no-store"
 				root * @@APP_DIR@@
 				rewrite * /login.html
 				file_server
+			}
+			# Service Worker：必须在站点根路径才能控制整个站点；脚本本身不能缓存，
+			# 否则更新要等浏览器自己过期
+			handle /sw.js {
+				header Cache-Control "no-cache"
+				root * @@APP_DIR@@
+				file_server
+			}
+			# Vite 的 /assets/* 是内容 hash 命名：一年不可变，换版本自然换 URL
+			handle /assets/* {
+				header {
+					defer
+					Cache-Control "public, max-age=31536000, immutable"
+				}
+				reverse_proxy 127.0.0.1:@@UPSTREAM_PORT@@
+			}
+			# GenUI runtime 没有版本号：给 1 小时，既避免每次启动重下 1.7MB，又不至于长期陈旧
+			handle /dsh-genui/runtime.js {
+				header {
+					defer
+					Cache-Control "public, max-age=3600"
+				}
+				reverse_proxy 127.0.0.1:@@UPSTREAM_PORT@@
 			}
 			# 关键：不重写 Host/Origin。DSH 通过 --trusted-host 接受这个 authority，
 			# Cookie 因此天然同源，不需要任何注入或伪造。

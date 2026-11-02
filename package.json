@@ -1,7 +1,7 @@
 {
   "name": "dsh-remote-panel",
-  "version": "0.4.5",
-  "description": "DSH 远程访问控制面：部署向导、状态面板与一键配对（EasyTier + Caddy），数据面保持进程外。",
+  "version": "1.0.0",
+  "description": "DSH 远程访问控制面 + 手机监看面板：部署、配对、状态，以及在手机上实时看见 agent 的每一步。",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
@@ -24,6 +24,8 @@
   "files": [
     "lib",
     "deploy",
+    "console",
+    "tools/build-console.mjs",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
@@ -34,7 +36,8 @@
   },
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
-    "e2e": "node test/e2e/shell.mjs"
+    "e2e": "node test/e2e/shell.mjs",
+    "build:console": "node tools/build-console.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4"
@@ -60,5 +63,8 @@
   "publishConfig": {
     "access": "public"
   },
-  "author": "curleaf"
+  "author": "curleaf",
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
 }
