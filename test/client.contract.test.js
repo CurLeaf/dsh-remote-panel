@@ -462,3 +462,26 @@ test('落点：慢慢拖过一半才翻，轻甩一下就翻', () => {
 	assert.equal(settle(0, -9000, size, pages, 0), 0)
 	assert.equal(settle(2 * size, 9000, size, pages, 2), 2)
 })
+
+// ---------------------------------------------------------------- 外壳语义钩子
+
+test('外壳优先用语义钩子认，不靠哈希类名', () => {
+	const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+	// 三根柱子（frame / 侧栏 / 正文）的识别必须走宿主自己的 data-* 契约
+	assert.ok(source.includes('[data-shell-overlay]'), '应该用 data-shell-overlay 找外壳')
+	assert.ok(source.includes('data-sidebar-collapsed'), '折叠态应该认宿主的布尔属性')
+	assert.ok(source.includes("setAttribute('data-rp-page', 'sessions')"), '侧栏应该打上自己的标')
+	assert.ok(source.includes("setAttribute('data-rp-page', 'chat')"), '正文应该打上自己的标')
+	// 哈希类名只能当兜底：出现「语义在前、类名在后」的降级链
+	assert.ok(source.includes("source = 'class'"), '必须有退回哈希类名的兜底分支')
+	// CSS 里也要认标，否则 JS 换了识别方式、样式还在靠哈希类名
+	assert.ok(source.includes('[data-rp-page="sessions"]'), 'CSS 要认 data-rp-page')
+	assert.ok(source.includes('[data-rp-frame]'), 'CSS 要认 data-rp-frame')
+})
+
+test('外壳契约来源会随自检上报（面板才能区分「语义钩子」和「哈希兜底」）', () => {
+	const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+	assert.ok(source.includes('JSON.stringify({ missing, shell })'), '上报里要带 shell 来源')
+	assert.ok(source.includes('外壳契约'), '面板要有一行「外壳契约」')
+	assert.ok(source.includes('外壳只能靠哈希类名认出来'), '退回哈希类名时要给出可见提示')
+})

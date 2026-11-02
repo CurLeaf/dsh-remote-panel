@@ -105,3 +105,38 @@ test('外壳自检上报后，/status 能读到', async () => {
 	assert.equal(parsed.shell.ok, false)
 	assert.deepEqual(parsed.shell.missing, ['wSkVaW_'])
 })
+
+test('外壳契约来源（semantic / class）能一路带到 /status', async () => {
+	const post = response()
+	const body = JSON.stringify({ missing: [], shell: 'semantic' })
+	const req = {
+		method: 'POST',
+		url: `${API_PREFIX}/shell`,
+		headers: { [TOKEN_HEADER]: token, 'content-type': 'application/json' },
+		async *[Symbol.asyncIterator]() {
+			yield Buffer.from(body)
+		},
+	}
+	await handleRequest(req, post, { token })
+	assert.equal(post.state.status, 200)
+	const posted = JSON.parse(post.state.body)
+	assert.equal(posted.shell, 'semantic')
+
+	const status = response()
+	await handleRequest(request({ url: `${API_PREFIX}/status`, headers: { [TOKEN_HEADER]: token } }), status, { token })
+	const parsed = JSON.parse(status.state.body)
+	assert.equal(parsed.shell.shell, 'semantic')
+
+	// 非法值不能污染自检：落成 null，面板按「没上报」处理
+	const bad = response()
+	const badReq = {
+		method: 'POST',
+		url: `${API_PREFIX}/shell`,
+		headers: { [TOKEN_HEADER]: token, 'content-type': 'application/json' },
+		async *[Symbol.asyncIterator]() {
+			yield Buffer.from(JSON.stringify({ missing: [], shell: 'whatever' }))
+		},
+	}
+	await handleRequest(badReq, bad, { token })
+	assert.equal(JSON.parse(bad.state.body).shell, null)
+})

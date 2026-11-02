@@ -1688,3 +1688,34 @@ history.back()  page=1  history.state=null                ← 守卫弹掉，页
 证据截图：`docs/live-layer-closed.png`（收起）、`docs/live-layer-open.png`（展开）、`docs/live-layer-desktop.png`（桌面）。
 
 15/15 通过。**剩下的只有真机手感**（贴边起手区、滑动阈值在 120Hz 屏上的观感），清单见 `docs/verify.md` 的 H24 行。
+
+## 2026-11-03 · 三屏改用外壳语义钩子（不再靠哈希类名认）
+
+**问题**：三屏轨道原先靠 `[class*="_frame"]` / `[class*="_sidebarCol"]` / `_collapsed` 认外壳，
+DSH 每次换构建都会换前缀，一换就整片失效（只能靠面板那盏「外壳适配」灯事后发现）。
+
+**改法**：先认宿主自己的稳定契约，再退回哈希类名。
+
+| 要找的 | 语义钩子 | 兜底 |
+|---|---|---|
+| 外壳 frame | `[data-shell-overlay]` 的父节点 | `[class*="_frame"]` |
+| 侧栏 | frame 里第一个非附属子节点（右侧栏 `data-rightbar-col`、底行 `data-shell-bottom`、浮层 `data-shell-overlay` 都排除） | `[class*="_sidebarCol"]` |
+| 正文列 | frame 里第二个非附属子节点 | `[class*="_centerCol"]` |
+| 侧栏是否展开 | frame 上的 `data-sidebar-collapsed`（布尔属性，有=收起） | 侧栏内部 `_collapsed` |
+
+认出来之后写 `data-rp-frame` / `data-rp-page="sessions"|"chat"`，CSS 与手势只认这两个标；
+来源写进 frame 的 `data-rp-source`，随 `/shell` 上报，面板多一行「外壳契约」（语义绿灯 / 类名兜底黄灯）。
+
+**实测（390×844）**：
+
+| 检查 | 结果 |
+|---|---|
+| frame / 侧栏 / 正文的标 | `[data-rp-frame]`、`[data-rp-page="sessions"]`、`[data-rp-page="chat"]` 全在 |
+| `data-rp-source` | `semantic` |
+| 收起态 | frame 有 `data-sidebar-collapsed`，网格 `390px 0px 0px` |
+| 翻到会话列表 | `page=2`，侧栏 `390×844`，`data-sidebar-collapsed` 消失 |
+| 翻到非对话 | `page=0`，`.dsh-page-console .app` 宽 `390`（吃满） |
+| 系统返回 | `history.back()` → `page=1`，`history.state=null` |
+| 1281 桌面 | 网格 `280px 1000px 0px`、非对话层 `display:none`、`data-rp-source` 仍是 `semantic` |
+
+测试 209 条：208 pass / 0 fail / 1 skipped（新增 `/shell` 来源字段 3 条断言 + 客户端契约 2 条）。

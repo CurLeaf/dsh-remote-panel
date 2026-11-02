@@ -29,6 +29,9 @@ dsh plugin --profile web add dsh-remote-panel
 | H2 | 松手 | 过 50% 或快速甩落下一页，否则弹回；两端有橡皮筋（拉 280px 只走 ~110px） | `pagerSettle` 的投影/相邻页夹取 |
 | H2 | 非对话页按系统返回 | 先翻回对话（不退出页面）；再按才退出 | `history.state.dshPage` 是否只有一条守卫 |
 | H2 | 竖着滚正文 / 在代码块上横划 | 只滚动 / 只横滚，不会把屏拽走 | 判轴阈值与 `blockedScroll` |
+| H24 | 打开任意一屏 | `html` 下能找到 `[data-rp-frame]`，侧栏/正文分别带 `data-rp-page="sessions"|"chat"`，frame 上 `data-rp-source="semantic"` | `markShell()` 是否退回 `class` |
+| H24 | 面板「运行状态」 | 多一行「外壳契约」：语义钩子时绿灯 | `/status` 的 `shell.shell` 是不是 `semantic` |
+| H24 | 收起侧栏 | frame 带 `data-sidebar-collapsed`，侧栏 `display:none` | 语义选择器 `[data-rp-frame][data-sidebar-collapsed] [data-rp-page="sessions"]` |
 | H3 | 390px 正文 | 占满宽度 | `[class*="_frame"]` 的 `grid-template-columns` |
 | H3 | 空态 | 问候语居中、输入条贴底、整页纯黑 | `.uV2eYG_root` 是否 `position: fixed` |
 | H3 | 输入框 | 点输入条弹键盘，输入条浮到键盘上沿（不遮住正在打的字），正文仍然从卡片下面穿过、不被切成两层 | `--dsh-kb-inset` 是否等于键盘高度、座位是否还是 `position: sticky` |
