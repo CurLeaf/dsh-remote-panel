@@ -7,3 +7,6 @@ coverage/
 # 构建产物
 android/out/
 android/dsh-pocket.apk
+
+# 监看面板的构建中间产物
+console/styles.generated.js
