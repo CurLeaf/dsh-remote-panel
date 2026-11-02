@@ -33,7 +33,7 @@
     "dsh": ">=0.2.1-rc.3"
   },
   "scripts": {
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node --test test/*.test.js",
     "e2e": "node test/e2e/shell.mjs",
     "build:console": "node tools/build-console.mjs",
     "verify:live": "node tools/verify-live.mjs"

@@ -20,15 +20,16 @@ dsh plugin --profile web add dsh-remote-panel
 | H1 | 390px 下看顶部 | 左边 ☰、中间工作区 chip（点开是原生工作区菜单）、右边 ＋ 新建 | Console 有无 `[remote-panel] 未匹配到布局容器` |
 | H1 | 点 ＋ | 在「当前会话所在工作区 → 最近工作区」开一条空白对话 | `ctx.get('uiWorkspace')` 是否有值 |
 | H1 | 390px 下看底部 | **没有**三格底栏；输入条是一整块卡片，按钮行保留原生控件（+ / 权限 / GenUI / 模型 / 发送） | 元素面板搜 `.dsh-mobile-bar` |
-| H24 | 点 ☰ | 会话层整屏铺出来（无圆角 / 投影 / 遮罩），关掉后正文回满屏 | `html.dsh-drawer-open`；frame 上 `data-sidebar-collapsed` 是否被去掉 |
-| H24 | 会话层里看内容 | 工作区列表、面板入口（工作区 Git / 监看）、账号区都在，宽度铺满屏 | `[data-qzsy-drawer]` 有无标记；`.hHd-Xa_root` 是否 100% |
-| H24 | 点会话行 / 面板行 | 抽屉自动收起并跳过去（面板页由「返回对话」条带队） | click 处理器是否被输入框/「⋯」菜单的排除规则挡住 |
+| H2 | 点 ☰ | 往左翻到**会话列表**整页（不是弹一张 280px 抽屉），顶栏跟着整屏走 | `html[data-dsh-page]` 是否变成 `2` |
+| H2 | 会话列表页 | 铺满整屏、无圆角无投影无遮罩；只有「工作区列表 + 工作区 Git + 余额/账号」 | 展开态是否被强制成 `width:100vw`；`.dsh-mobile-scrim` 应该**不存在** |
+| H2 | 点会话行 / 面板行 | 自动翻回对话页（桌面不动） | `matchMedia('(max-width:1023px)')`；回落是否走 `pagerApi.go(1)` |
 | H2 | 点 chip 右侧的 × | 回到「选择工作区」空态（输入条禁用），× 自动隐藏；再点 chip 弹原生选择器 | `.dsh-mobile-clear-workspace` 的 `data-none` |
-| H24 | 左缘右滑 / 抽屉内左滑 | 打开 / 收起；竖着滚列表时斜划不会误触 | `drawerSwipeAction` 的 48px 阈值与 0.8 判轴 |
-| H24 | 按 Esc / 抽屉内左滑 | 会话层收起，正文恢复可点 | 收起来源只剩「☰ / Esc / 左滑 / 选中行」，遮罩随整屏形态删掉了 |
-| H24 | 会话层开着按系统返回 | 先收起会话层（不退出页面），再按才退出 | `history.state.dshGuard` 是否只有一条守卫 |
-| H24 | 竖着滚正文 / 在代码块上横划 | 只滚动 / 只横滚，不会把会话层拽出来 | 判轴：左缘 28px 起手、48px 阈值、`|dy| ≤ |dx|×0.8` |
-| H3 | 390px 正文 | 占满宽度 | `[data-qzsy-frame]` 的 `grid-template-columns`（应为 `0px <满宽> 0px` 或 `<满宽> 0px 0px`） |
+| H2 | 对话页往右滑 | 非对话页从左边**整屏**推出来，三页同时 1:1 跟着手指（正文位移 = 手指位移） | `_centerCol` / `.dsh-page-console` 的内联 `translate3d` 是否同幅反向 |
+| H2 | 对话页往左滑 | 会话列表从右边整屏推出来；松手前侧栏才挂载，且第一帧就在屏外 | `html.dsh-pager-side`、`_sidebarCol` 的展开标记 |
+| H2 | 松手 | 过 50% 或快速甩落下一页，否则弹回；两端有橡皮筋（拉 280px 只走 ~110px） | `pagerSettle` 的投影/相邻页夹取 |
+| H2 | 非对话页按系统返回 | 先翻回对话（不退出页面）；再按才退出 | `history.state.dshPage` 是否只有一条守卫 |
+| H2 | 竖着滚正文 / 在代码块上横划 | 只滚动 / 只横滚，不会把屏拽走 | 判轴阈值与 `blockedScroll` |
+| H3 | 390px 正文 | 占满宽度 | `[class*="_frame"]` 的 `grid-template-columns` |
 | H3 | 空态 | 问候语居中、输入条贴底、整页纯黑 | `.uV2eYG_root` 是否 `position: fixed` |
 | H3 | 输入框 | 点输入条弹键盘，输入条浮到键盘上沿（不遮住正在打的字），正文仍然从卡片下面穿过、不被切成两层 | `--dsh-kb-inset` 是否等于键盘高度、座位是否还是 `position: sticky` |
 | H3 | 输入完拖着正文滚 | 手指一碰到正文键盘就收起、输入条回到贴底；点输入条自己（按钮/模型/发送）不收起 | `installComposerDismiss` 是否只在 `(pointer: coarse)` 下挂 |
@@ -45,19 +46,20 @@ dsh plugin --profile web add dsh-remote-panel
 
 ```js
 ({
-  frame: !!document.querySelector('[data-qzsy-frame]'),
-  drawer: !!document.querySelector('[data-qzsy-drawer]'),
-  collapsed: document.querySelector('[data-qzsy-frame]')?.hasAttribute('data-sidebar-collapsed') ?? null,
-  open: document.documentElement.classList.contains('dsh-drawer-open'),
+  frame: !!document.querySelector('[class*="_frame"]'),
+  sidebar: document.querySelectorAll('[class*="_sidebarCol"]').length,
+  collapsed: !!document.querySelector('[class*="_collapsed"]'),
   hamburger: !!document.querySelector('.dsh-mobile-hamburger'),
   newChat: !!document.querySelector('.dsh-mobile-newchat'),
-  leftovers: !!document.querySelector('.dsh-pager-seam, .dsh-page-console'),
+  pager: !!document.querySelectorAll('.dsh-pager-seam').length,
+  page: document.documentElement.dataset.dshPage,
+  consolePage: !!document.querySelector('.dsh-page-console'),
   style: !!document.getElementById('dsh-remote-panel-shell'),
 })
 ```
 
-期望：`frame/drawer/hamburger/newChat/style` 全为真、`leftovers === false`；
-390px 下点 ☰ 后 `open === true`、`collapsed === false`，1281px 下汉堡与新建 `display: none`。
+期望：`frame/sidebar/hamburger/newChat/pager/style` 全为真、`page === '1'`；
+390px 下汉堡与新建可见，1281px 下两者 `display: none`、`.dsh-page-console` 也是 `none`。
 
 ---
 
