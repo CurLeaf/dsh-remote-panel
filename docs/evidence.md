@@ -1604,6 +1604,12 @@ history.back()  page=1  history.state=null                ← 守卫弹掉，页
 
 ## 2026-11-02 · 三屏翻页 → 语义会话层：把「自绘整屏轨道」这条旧链路拆掉
 
+> **2026-11-03 回退**：这一版（抽屉 / 语义会话层）已撤下，产品要的是**三屏翻页**（见上一节）。
+> 这段保留下来，是因为它指出了一件真问题：三屏轨道依赖 `_sidebarCol` / `_collapsed` 这类哈希类名，
+> DSH 换前缀就会碎。后续该做的事是把 `data-sidebar-collapsed`、`[data-shell-overlay]` 这些
+> **语义钩子**用到三屏上（现在只是把抽屉整段删掉、换回轨道，没做这层改造）。
+
+
 **背景**：@qzsy/dsh-bridge 的移动端适配（`client/mobile.js`）证明了另一条路——**不接管整屏**，
 只借宿主自己的侧栏做抽屉、把 `[role=menu]` 改成底部 sheet。它挑元素用 `role` / `aria-haspopup` /
 `aria-label` 这类语义钩子，宿主换 hash 前缀也不会碎。
