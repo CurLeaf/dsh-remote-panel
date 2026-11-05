@@ -1,5 +1,4 @@
-import { fmtSec, fmtClock, shortPath, shortCmd, slug, patchOf, attemptDiff, STATUS_TEXT } from './engine.js'
-import { compact } from './diff.js'
+import { fmtSec, shortCmd, patchOf } from './engine.js'
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const baseName = (p) => String(p).split('/').pop()
@@ -81,7 +80,6 @@ export function mount(root, store, options = {}) {
       <header class="navbar" id="navbar"></header>
       <main class="screen" id="screen"></main>
       <div class="action-bar" id="actionBar"></div>
-      <nav class="tabbar" id="tabbar"></nav>
       <div class="flat-layer" id="flatLayer"></div>
       <div class="toast-layer" id="toastLayer"></div>
     </div>`
@@ -89,7 +87,6 @@ export function mount(root, store, options = {}) {
   const els = {
     nav: root.querySelector('#navbar'),
     screen: root.querySelector('#screen'),
-    tabbar: root.querySelector('#tabbar'),
     bar: root.querySelector('#actionBar'),
     flat: root.querySelector('#flatLayer'),
     toast: root.querySelector('#toastLayer'),
@@ -314,7 +311,6 @@ export function mount(root, store, options = {}) {
   // ---------- 渲染 ----------
   const unsubscribe = store.subscribe((d) => {
     renderNavbar(els.nav, d, store)
-    renderTabs(els.tabbar, d, store)
     renderActionBar(els.bar, els.app, d, store)
 
     const sig = [
@@ -390,36 +386,11 @@ function renderNavbar(el, d, store) {
 }
 
 // ---------- 标签栏 ----------
-function renderTabs(el, d, store) {
-  // 实时模式没有「接受」的服务端语义，别摆一个假按钮
-  const tabs = store.live
-    ? [['sessions', '会话', 'list'], ['now', '现在', 'gauge'], ['changes', '变更', 'doc']]
-    : [['now', '现在', 'gauge'], ['changes', '变更', 'doc'], ['accept', '验收', 'check']]
-  const sig = store.ui.view + '|' + tabs.map((t) => t[0]).join(',') + '|' + store.ui.acceptance.status
-  if (el._sig === sig) return
-  el._sig = sig
-  el.style.gridTemplateColumns = `repeat(${tabs.length}, 1fr)`
-  el.innerHTML = tabs.map(([id, label, ico]) => `
-    <button class="tab ${store.ui.view === id ? 'active' : ''}" data-act="nav" data-view="${id}">
-      ${icon(ico)}<span>${label}</span>
-      ${id === 'accept' && d.artifact && store.ui.acceptance.status === 'pending' ? '<i class="tab-dot"></i>' : ''}
-    </button>`).join('')
-}
-
 // ---------- 路由 ----------
 function renderScreen(d, store) {
   const { ui } = store
-  if (ui.detail) {
-    if (ui.detail.kind === 'preview') return renderPreview()
-    if (ui.detail.kind === 'file') return renderFileDetail(d, ui.detail.id, store)
-  }
-  if (ui.view === 'sessions') return renderSessions(d, store)
-  if (ui.view === 'now') {
-    if (store.live && d.steps.length === 0) return renderLiveEmpty(d, store)
-    return renderNow(d, store)
-  }
-  if (ui.view === 'changes') return renderChanges(d, store)
-  return renderAccept(d, store)
+  // 摘要页是唯一视图：会话列表在左屏、变更在聊天里，不再重复。
+  return renderSummary(d, store)
 }
 
 // ---------- 会话总览 ----------
@@ -433,50 +404,19 @@ function agoText(ms) {
   return `${Math.round(ms / 86400e3)} 天前`
 }
 
-function levelText(item) {
-  if (item.level === 'pending') return `等你处理 · ${item.pending ?? '待确认'}`
-  if (item.level === 'stale') return `可能卡住 · ${agoText(item.ageMs)}没有新动作`
-  if (item.level === 'done') return `已完成 · 未查看（${agoText(item.ageMs)}）`
-  if (item.level === 'running') return `运行中 · ${agoText(item.ageMs)}有动作`
-  return `空闲 · ${agoText(item.ageMs)}`
-}
-
-function renderSessions(d, store) {
-  const overview = store.overview
-  if (overview === null || overview === undefined) {
-    return `<div class="page"><h1>会话</h1><p>正在读取会话列表…</p></div>`
-  }
-  const { counts, inbox, sessions } = overview
-  const row = (item) => {
-    const [name, tone] = LEVEL_ICON[item.level] ?? LEVEL_ICON.idle
-    return `<button class="row" data-act="session" data-id="${esc(item.id)}">
-      <span class="row-icon ${tone}">${icon(name)}</span>
-      <div class="row-main">
-        <span class="row-title">${esc(item.title)}${item.current ? ' · 当前' : ''}</span>
-        <span class="row-sub">${esc(levelText(item))}</span>
-      </div>
-      <span class="chevron">${icon('chevron')}</span>
-    </button>`
-  }
-  const rest = sessions.filter((item) => item.level === 'running' || item.level === 'idle')
-  return `
-    <div class="page">
-      <h1>会话</h1>
-      <p>${counts.pending > 0 ? `${counts.pending} 个等你处理` : counts.running > 0 ? `${counts.running} 个在跑` : '都在闲着'} · 共 ${counts.total} 个</p>
-    </div>
-    ${inbox.length === 0 ? '' : `<div class="section-title">待处理</div><div class="group">${inbox.slice(0, 20).map(row).join('')}</div>`}
-    <div class="section-title">全部会话</div>
-    <div class="group">${rest.slice(0, 30).map(row).join('') || '<div class="empty">没有其它会话</div>'}</div>
-  `
-}
-
 // ---------- 现在 ----------
-/** 处置动作区：待批 / 手机批准开关 / 短语 / 断点 / 通知——「现在」和「空会话」共用。 */
-function renderQuickActions(store) {
+function renderSummary(d, store) {
+  const { ui } = store
   const pending = store.approvals ?? []
   const watching = (store.watching ?? []).includes(store.currentSessionId)
-  const PHRASES = ['继续', '先停下', '只看不改', '换个方案']
-  const approvalCard = pending.length === 0 ? '' : `<div class="section-title">等你批准（${pending.length}）</div>
+  const place = [d.task.branch, d.task.workdir.replace(/^.*\//, '')].filter(Boolean).join(' · ')
+  const lastStep = d.steps && d.steps.length ? d.steps[d.steps.length - 1] : null
+  const busy = Boolean(lastStep) || pending.length > 0 || Boolean(ui.takeover)
+  const totals = d.totals ?? { files: 0, add: 0, del: 0 }
+
+  const sub = ui.takeover ? '已接管 · agent 已暂停' : place || '等待会话'
+
+  const approveCard = pending.length === 0 ? '' : `<p class="section-title">等你批准（${pending.length}）</p>
     <div class="group">${pending.map((p) => `
       <div class="row static">
         <span class="row-icon orange">${icon('warn')}</span>
@@ -489,52 +429,18 @@ function renderQuickActions(store) {
         <button class="link-btn" data-act="approve" data-id="${esc(p.id)}">批准这次</button>
         <button class="link-btn" data-act="reject" data-id="${esc(p.id)}" style="color:var(--red)">拒绝</button>
       </div>`).join('')}</div>`
-  return `${approvalCard}
-    <div class="group">
+
+  const emptyCard = `<div class="group">
       <div class="row static">
-        <span class="row-icon ${watching ? 'green' : 'gray'}">${icon('hand')}</span>
+        <span class="row-icon gray">${icon('wave')}</span>
         <div class="row-main">
-          <span class="row-title">手机批准：${watching ? '开' : '关'}</span>
-          <span class="row-sub">${watching ? '这个会话的审批会停下来等你在手机上点' : '默认关：审批照旧在桌面弹'}</span>
+          <span class="row-title">还没有可看的执行</span>
+          <span class="row-sub">发一条消息，这里会显示它正在做什么</span>
         </div>
-        <button class="link-btn" data-act="watch">${watching ? '关闭' : '打开'}</button>
-      </div>
-    </div>
-    <div class="chips">${PHRASES.map((t) => `<button class="chip" data-act="say" data-text="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-    <div class="group">
-      <div class="row static">
-        <span class="row-icon blue">${icon('bookmark')}</span>
-        <div class="row-main">
-          <span class="row-title">断点接力</span>
-          <span class="row-sub">标记后，桌面「设置 → 远程访问」能看到你标的位置</span>
-        </div>
-        <button class="link-btn" data-act="mark">标记待处理</button>
-      </div>
-      <div class="row static">
-        <span class="row-icon gray">${icon('warn')}</span>
-        <div class="row-main">
-          <span class="row-title">完成/待批通知</span>
-          <span class="row-sub">页面在后台时弹系统通知（PWA / 安卓壳同一条路）</span>
-        </div>
-        <button class="link-btn" data-act="notify">开启通知</button>
       </div>
     </div>`
-}
 
-function renderNow(d, store) {
-  const { ui } = store
-  const step = d.current
-  const warn = d.now.level === 'warn'
-  const place = [d.task.branch, d.task.workdir.replace(/^.*\//, '')].filter(Boolean).join(' · ')
-  const sub = ui.takeover ? '已接管 · agent 已暂停' : place || '等待会话'
-  const quick = renderQuickActions(store)
-  return `
-    <div class="page">
-      <h1>现在</h1>
-      <p>${esc(sub)}</p>
-    </div>
-${quick}
-
+  const statusCard = `<p class="section-title">状态</p>
     <div class="group status">
       <div class="row static">
         <span class="row-icon blue">${icon('wave')}</span>
@@ -543,226 +449,74 @@ ${quick}
           <span class="row-sub">在做什么</span>
         </div>
       </div>
-      <button class="row" data-act="nav" data-view="changes">
+      <div class="row static">
         <span class="row-icon gray">${icon('doc')}</span>
         <div class="row-main">
           <span class="row-title">${esc(d.now.scope)}</span>
           <span class="row-sub">改动范围</span>
         </div>
-        <span class="chevron">${icon('chevron')}</span>
-      </button>
-      <button class="row" data-act="focus" data-anchor="${esc(step ? `step-${step.id}` : '')}">
-        <span class="row-icon ${warn ? 'orange' : 'gray'}">${icon(warn ? 'warn' : 'check')}</span>
-        <div class="row-main">
-          <span class="row-title" ${warn ? 'style="color: var(--orange)"' : ''}>${esc(d.now.momentum)}</span>
-          <span class="row-sub">节奏</span>
-        </div>
-        <span class="chevron">${icon('chevron')}</span>
-      </button>
-      <div class="row replay">
-        <button class="play" data-act="play" aria-label="播放或暂停">${ui.playing ? icon('pause') : icon('play')}</button>
-        <input id="scrub" type="range" min="0" max="${store.duration}" step="1" value="${Math.round(ui.t)}" aria-label="回放" />
-        <span class="time">${fmtClock(ui.t)}</span>
       </div>
-    </div>
-
-    <p class="section-title">步骤</p>
-    <div class="group steps">
-      ${d.steps.map((s) => renderStep(s, d, store)).join('')}
-    </div>
-
-    <div class="group">
-      <button class="row" data-act="drawer" data-tab="term">
-        <span class="row-icon gray">${icon('terminal')}</span>
-        <div class="row-main">
-          <span class="row-title">原始输出</span>
-          <span class="row-sub">终端 · git status · 最近 patch</span>
-        </div>
-        <span class="chevron">${icon('chevron')}</span>
-      </button>
-    </div>
-`
-}
-
-/** 实时模式但没有可看的执行：不要拿演示数据糊弄。 */
-function renderLiveEmpty(d, store) {
-  const place = [d.task.branch, d.task.workdir.replace(/^.*\//, '')].filter(Boolean).join(' · ')
-  return `
-    <div class="page">
-      <h1>现在</h1>
-      <p>${esc(place || '等待会话')}</p>
-    </div>
-    ${renderQuickActions(store)}
-    <div class="group">
       <div class="row static">
-        <span class="row-icon gray">${icon('wave')}</span>
+        <span class="row-icon ${d.now.level === 'warn' ? 'orange' : 'gray'}">${icon(d.now.level === 'warn' ? 'warn' : 'check')}</span>
         <div class="row-main">
-          <span class="row-title">还没有可看的执行</span>
-          <span class="row-sub">发一条消息，步骤、改动和命令会实时出现在这里</span>
+          <span class="row-title" ${d.now.level === 'warn' ? 'style="color: var(--orange)"' : ''}>${esc(d.now.momentum)}</span>
+          <span class="row-sub">节奏</span>
         </div>
       </div>
     </div>`
-}
 
-
-/** 调用链：一行一次调用，摘要截断，最多留最近 8 条。 */
-function renderCallChain(calls) {
-  const shown = calls.slice(-8)
-  const oneLine = (text) => String(text ?? '').replace(/\s+/g, ' ').trim()
-  const row = (c) => {
-    const head = `${c.name} · ${oneLine(c.summary).slice(0, 56)}`
-    const tail = c.dur == null ? '运行中' : `${fmtSec(c.dur)}${c.ok === false ? ' · 失败' : ''}`
-    return `<div class="step-act"><span class="step-act-t">${fmtClock(c.t)}</span><span class="step-act-x">${esc(head)} · ${esc(tail)}</span></div>`
-  }
-  const more = calls.length > shown.length ? `<div class="step-more">还有 ${calls.length - shown.length} 条更早的调用</div>` : ''
-  return `<div class="step-expect">调用链（${calls.length}）</div>${more}${shown.map(row).join('')}`
-}
-
-function renderStep(s, d, store) {
-  const open = store.ui.openStep === s.id
-  const f = s.facts ?? {}
-  const acts = d.activity.filter((a) => a.t >= (s.startT ?? Infinity) && a.t <= (s.endT ?? Infinity) && a.kind !== 'step')
-  const bits = [statusText(s)]
-  if (s.stale) bits.push(`卡住 ${fmtSec(s.elapsed)}`)
-  if (f.calls) bits.push(`${f.calls} 次调用`)
-  if (f.files) bits.push(`${f.files} 个文件 +${f.add} −${f.del}`)
-  if (f.exit != null) bits.push(`exit ${f.exit}`)
-  if (f.tests) bits.push(`${f.tests.passed} 通过 / ${f.tests.failed} 失败`)
-  const total = Math.max(1, d.duration || 1)
-  const width = Math.max(2, Math.min(100, Math.round((s.elapsed ?? 0) / total * 100)))
-
-  return `<div class="step ${s.status} ${open ? 'open' : ''}">
-    <div class="step-head" data-act="step" data-id="${s.id}" id="step-${s.id}">
-      <span class="step-idx">${s.index}</span>
-      <div class="step-main">
-        <span class="step-title">${esc(s.title)}${s.skipped ? ' · 已跳过' : ''}</span>
-        <span class="step-meta">${bits.map((b) => esc(b)).join(' · ')}</span>
-      </div>
-      <span class="step-chevron">${icon('chevron')}</span>
-    </div>
-    ${open ? `<div class="step-body">
-      ${s.startT === null ? '' : `<div class="step-act"><span class="step-act-x muted">耗时 ${fmtSec(s.elapsed ?? 0)}${s.stale ? ' · 已超过 3 分钟没有新动作' : ''}</span></div>
-      <div class="bar"><div class="${s.stale || s.status === 'failed' ? 'bar-del' : 'bar-add'}" style="width:${width}%"></div></div>`}
-      ${(s.calls ?? []).length ? renderCallChain(s.calls) : ''}
-      ${s.expect ? `<div class="step-expect">预期：${esc(s.expect)}</div>` : ''}
-      ${(s.calls ?? []).length ? '' : acts.length ? acts.slice(-8).map((a) => `
-        <div class="step-act ${a.target ? 'tappable' : ''}" ${a.target ? `data-act="open" data-kind="${a.target.kind}" data-id="${esc(a.target.id)}" data-long="${a.target.kind}"` : ''}>
-          <span class="step-act-t">${fmtClock(a.t)}</span>
-          <span class="step-act-x">${esc(a.text)}</span>
-        </div>`).join('') : '<div class="step-act"><span class="step-act-x muted">这一步没有动作</span></div>'}
-      ${acts.length > 8 ? `<div class="step-more">还有 ${acts.length - 8} 条更早的动作</div>` : ''}
-      <div class="step-foot"><button class="link-btn" data-act="sheet" data-long="step" data-id="${s.id}">重跑或跳过这一步</button></div>
-    </div>` : ''}
-  </div>`
-}
-
-function statusText(s) {
-  return s.status === 'done' ? '已完成' : s.status === 'failed' ? '未达预期' : s.status === 'running' ? '进行中' : '未开始'
-}
-
-// ---------- 变更 ----------
-function renderChanges(d, store) {
-  const edited = d.files.filter((f) => f.attempts.length)
-  const readOnly = d.files.filter((f) => !f.attempts.length)
-  const accepted = new Set(store.acceptedFiles(d).map((f) => f.path))
-  const max = Math.max(1, ...edited.map((f) => f.add + f.del))
-  const tags = (f) => [f.sensitive ? '敏感' : '', f.ignored ? '已忽略' : '', f.reverted ? '已回滚' : ''].filter(Boolean)
-
-  return `
-    <div class="page">
-      <h1>变更</h1>
-      <p>${d.totals.files} 个文件 · <span style="color: var(--green)">+${d.totals.add}</span> <span style="color: var(--red)">−${d.totals.del}</span>${d.totals.sensitive ? ` · ${d.totals.sensitive} 个敏感` : ''}</p>
-    </div>
-
-    <p class="section-title">已修改</p>
+  const changesCard = totals.files === 0 ? '' : `<p class="section-title">改动</p>
     <div class="group">
-      ${edited.length ? edited.map((f) => {
-        const on = accepted.has(f.path)
-        const dir = dirName(f.path)
-        const sub = [dir === '.' ? null : dir, `${f.attempts.length} 版`, ...tags(f)].filter(Boolean).join(' · ')
-        return `<div class="row" data-act="open" data-kind="file" data-id="${esc(f.path)}" data-long="file" id="file-${slug(f.path)}">
-          <button class="file-check ${on ? 'on' : ''}" data-act="exclude" data-id="${esc(f.path)}" aria-label="纳入验收">
-            ${on ? `<svg viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.3L19 7"/></svg>` : ''}
-          </button>
-          <div class="row-main">
-            <span class="row-title mono">${esc(baseName(f.path))}</span>
-            <span class="row-sub">${esc(sub)}</span>
-            <span class="bar"><i class="bar-add" style="width:${(f.add / max) * 100}%"></i><i class="bar-del" style="width:${(f.del / max) * 100}%"></i></span>
-          </div>
-          <span class="delta"><span class="add">+${f.add}</span><span class="del">−${f.del}</span></span>
-          <span class="chevron">${icon('chevron')}</span>
-        </div>`
-      }).join('') : '<div class="row static"><span class="row-title muted">还没有改动</span></div>'}
-    </div>
-
-    ${readOnly.length ? `
-    <p class="section-title">只读取</p>
-    <div class="group">
-      ${readOnly.map((f) => `<div class="row static">
-        <div class="row-main"><span class="row-title mono">${esc(baseName(f.path))}</span><span class="row-sub">${dirName(f.path) === '.' ? '' : esc(dirName(f.path)) + ' · '}读取 ${f.reads} 次</span></div>
-      </div>`).join('')}
-    </div>` : ''}
-`
-}
-
-// ---------- 验收 ----------
-function renderAccept(d, store) {
-  const a = store.ui.acceptance
-  const art = d.artifact
-  const accepted = store.acceptedFiles(d)
-  const passed = d.tests && d.tests.failed === 0
-
-  return `
-    <div class="page">
-      <h1>验收</h1>
-      <p class="${a.status === 'accepted' ? 'ok' : a.status === 'rejected' ? 'warn' : ''}">
-        ${a.status === 'accepted' ? '已验收，等待合并' : a.status === 'rejected' ? `已打回：${esc(a.reason || '未填理由')}` : art ? '改动已完成，等你确认' : 'agent 还在跑'}
-      </p>
-    </div>
-
-    <div class="artifact">
-      <div class="art-top">
-        <div class="art-ico">${icon('image')}</div>
+      <div class="row static">
+        <span class="row-icon gray">${icon('doc')}</span>
         <div class="row-main">
-          <div class="art-title">${esc(art?.title ?? '等待交付')}</div>
-          <div class="art-sub">${art ? `${art.files} 个文件 · +${art.add} −${art.del} · ${fmtClock(art.t)}` : '尚未产出'}</div>
+          <span class="row-title">${totals.files} 个文件</span>
+          <span class="row-sub"><span style="color: var(--green)">+${totals.add}</span> <span style="color: var(--red)">−${totals.del}</span>${totals.sensitive ? ` · ${totals.sensitive} 个敏感` : ''}</span>
         </div>
       </div>
-      <div class="art-actions">
-        <button class="btn secondary" data-act="open" data-kind="preview" data-id="result" ${art ? '' : 'disabled'}>体验结果</button>
-      </div>
-    </div>
+    </div>`
 
-    <p class="section-title">证据</p>
-    <div class="group">
+  const stopCard = busy ? `<div class="group">
+      <button class="row" data-act="say" data-text="先停下">
+        <span class="row-icon gray">${icon('stop')}</span>
+        <div class="row-main">
+          <span class="row-title">先停下</span>
+          <span class="row-sub">让 agent 停手，等你的下一步</span>
+        </div>
+      </button>
+    </div>` : ''
+
+  const watchRow = `<div class="group">
       <div class="row static">
-        <span class="row-icon ${passed ? 'green' : 'orange'}">${icon(passed ? 'check' : 'warn')}</span>
-        <div class="row-main"><span class="row-title">用例</span><span class="row-sub">${d.tests ? `${d.tests.passed} 通过 / ${d.tests.failed} 失败` : '暂无测试'}</span></div>
-        <span class="row-value ${passed ? '' : 'warn'}">${d.tests ? `${d.tests.passed}/${d.tests.passed + d.tests.failed}` : '—'}</span>
+        <span class="row-icon ${watching ? 'green' : 'gray'}">${icon('hand')}</span>
+        <div class="row-main">
+          <span class="row-title">手机批准：${watching ? '开' : '关'}</span>
+          <span class="row-sub">${watching ? '这个会话的审批停下来等你在手机上点' : '关着的时候，审批照旧在桌面弹'}</span>
+        </div>
+        <button class="link-btn" data-act="watch">${watching ? '关闭' : '打开'}</button>
       </div>
       <div class="row static">
-        <span class="row-icon blue">${icon('doc')}</span>
-        <div class="row-main"><span class="row-title">接受范围</span><span class="row-sub">${a.excluded.size ? `已排除 ${a.excluded.size} 个文件` : '在「变更」里可以取消勾选'}</span></div>
-        <span class="row-value">${accepted.length} 个文件</span>
+        <span class="row-icon gray">${icon('flag')}</span>
+        <div class="row-main">
+          <span class="row-title">后台通知</span>
+          <span class="row-sub">页面在后台时弹系统通知</span>
+        </div>
+        <button class="link-btn" data-act="notify">开启</button>
       </div>
+    </div>`
+
+  return `
+    <div class="page">
+      <h1>现在</h1>
+      <p>${esc(sub)}</p>
     </div>
-
-    ${a.status === 'accepted' ? `<div class="banner ok">
-      <span class="row-icon green">${icon('check')}</span>
-      <span class="banner-main">已接受 ${accepted.length} 个文件</span>
-      <button class="link-btn" data-act="reset-accept">重新验收</button>
-    </div>` : ''}
-    ${a.status === 'rejected' ? `<div class="banner danger">
-      <span class="row-icon red">${icon('warn')}</span>
-      <span class="banner-main">已打回</span>
-      <button class="link-btn" data-act="reset-accept">重新验收</button>
-    </div>` : ''}
-
-    ${a.status === 'pending' ? `<div class="actions">
-      <button class="btn primary" data-act="accept" ${art ? '' : 'disabled'}>接受 ${accepted.length} 个文件</button>
-      <button class="btn ghost destructive" data-act="open-reject" ${art ? '' : 'disabled'}>打回…</button>
-    </div>` : ''}
-`
+    ${approveCard}
+    ${place ? statusCard : emptyCard}
+    ${changesCard}
+    ${stopCard}
+    <p class="section-title">设置</p>
+    ${watchRow}
+  `
 }
 
 function renderActionBar(el, app, d, store) {
@@ -780,98 +534,6 @@ function renderActionBar(el, app, d, store) {
 }
 
 // ---------- 文件详情 ----------
-function renderFileDetail(d, file, store) {
-  const f = d.files.find((x) => x.path === file)
-  if (!f) return '<div class="empty">没有这个文件</div>'
-  const patch = patchOf(f)
-  const prev = attemptDiff(f)
-  const modes = [['current', '本轮'], ['prev', '上次尝试'], ['content', '正文']]
-  let body = ''
-  if (local.diffMode === 'current') {
-    body = f.reverted ? '<div class="empty">已回滚到原始版本</div>'
-      : patch ? hunkBlock(f, patch) : '<div class="empty">只读取过，没有改动</div>'
-  } else if (local.diffMode === 'prev') {
-    body = prev
-      ? `<div class="diff-meta">第 ${prev.from} 版 → 第 ${prev.to} 版 · +${prev.changes.add} −${prev.changes.del}</div>
-         <div class="hunk">${prev.lines.map((l) => lineRow(l)).join('')}</div>`
-      : '<div class="empty">只有一版改动，没有可对比的上一次</div>'
-  } else {
-    const content = contentOf(f)
-    body = content
-      ? `<div class="diff-meta">直接读文件，不经过 agent 转述</div>
-         <div class="hunk">${content.map((l) => `<div class="line"><span class="ln">${l.n}</span><span class="lt">${esc(l.text) || ' '}</span></div>`).join('')}</div>`
-      : '<div class="empty">还没有可读内容</div>'
-  }
-  const excluded = store.ui.acceptance.excluded.has(f.path)
-
-  return `
-    <div class="detail-path mono">${esc(f.path)}</div>
-    <div class="detail-meta">
-      <span class="mono">${f.attempts.length} 版</span>
-      <span class="mono" style="color: var(--green)">+${f.reverted ? 0 : f.add}</span>
-      <span class="mono" style="color: var(--red)">−${f.reverted ? 0 : f.del}</span>
-      <span>${STATUS_TEXT[f.status]}</span>
-    </div>
-    <div class="segmented">
-      ${modes.map(([m, l]) => `<button class="${local.diffMode === m ? 'on' : ''}" data-act="detail-tab" data-mode="${m}">${l}</button>`).join('')}
-    </div>
-    <div class="diff">${body}</div>
-    ${f.attempts.length ? `<div class="group">
-      <button class="row" data-act="exclude" data-id="${esc(f.path)}">
-        <span class="row-icon ${excluded ? 'gray' : 'green'}">${icon(excluded ? 'no' : 'check')}</span>
-        <div class="row-main"><span class="row-title">${excluded ? '已排除在验收之外' : '已纳入验收'}</span><span class="row-sub">点一下切换</span></div>
-      </button>
-    </div>` : ''}
-`
-}
-
-function hunkBlock(f, hunk) {
-  return `<div class="hunk-head" data-long="file" data-id="${esc(f.path)}">${esc(hunk.header)}</div>
-    <div class="hunk">${compact(hunk.lines, 2).map((l) => lineRow(l)).join('')}</div>`
-}
-
-function lineRow(l) {
-  if (l.type === 'gap') return `<div class="line gap">${esc(l.text)}</div>`
-  const mark = l.type === 'add' ? '+' : l.type === 'del' ? '−' : ' '
-  return `<div class="line ${l.type}"><span class="ln">${mark}</span><span class="lt">${esc(l.text) || ' '}</span></div>`
-}
-
-function contentOf(f) {
-  const h = patchOf(f)
-  if (!h) return null
-  const m = /\+(\d+)/.exec(h.header)
-  let n = m ? Number(m[1]) : 1
-  const out = []
-  for (const l of h.lines) {
-    if (l.type === 'del') continue
-    out.push({ n: n++, text: l.text })
-  }
-  return out
-}
-
-// ---------- 预览 ----------
-function renderPreview() {
-  const side = local.previewSide
-  return `
-    <div class="segmented" style="margin-top: 12px">
-      <button class="${side === 'before' ? 'on' : ''}" data-act="preview-side" data-mode="before">修复前</button>
-      <button class="${side === 'after' ? 'on' : ''}" data-act="preview-side" data-mode="after">修复后</button>
-    </div>
-    <div class="preview">
-      <div class="browser-bar"><span class="dots"></span><span class="url">127.0.0.1:4173/login</span></div>
-      <div class="mock ${side}">
-        <div class="mock-avatar"></div>
-        <div class="mock-title">${side === 'after' ? '已恢复登录' : '登录已失效'}</div>
-        <div class="mock-sub">${side === 'after' ? '会话已刷新，继续操作' : '401 · 被重定向到登录页'}</div>
-        <div class="mock-btn" data-act="preview-click">${side === 'after' ? '继续' : '重新登录'}</div>
-        <div class="mock-net ${side === 'after' ? 'ok' : 'bad'}">${side === 'after' ? 'POST /auth/refresh → 200' : 'POST /auth/refresh → 401'}</div>
-      </div>
-      <div class="preview-foot">真实产物 · 可直接点按</div>
-    </div>
-`
-}
-
-// ---------- 动作面板 / 打回 / 原始输出 ----------
 function renderFlat(el, d, store) {
   const s = store.ui.sheet
   const drawer = store.ui.drawer
