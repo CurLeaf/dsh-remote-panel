@@ -36,6 +36,8 @@ export class Store {
     this.currentSessionId = null
     this.approvals = []
     this.watching = []
+    /** 用户刚点过「手机批准」，轮询回来的旧值不能盖掉这次改动。 */
+    this.watchInFlight = 0
   }
 
   /** 接线真实会话：每次事件窗口变化都会推一份新的 (scenario, events)，外加会话总览。 */

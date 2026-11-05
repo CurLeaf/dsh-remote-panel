@@ -147,6 +147,16 @@ export function mount(root, store, options = {}) {
     if (!t) return
     const { act, id, kind, target, tier, label, view, mode, anchor } = t.dataset
     switch (act) {
+      case 'stop-run': {
+        const ok = options.onTakeover?.()
+        if (ok === false) {
+          store.toast('现在没有在跑的任务', 'mark')
+        } else {
+          store.toast('已请 agent 停手', 'ok')
+        }
+        store.emit()
+        break
+      }
       case 'takeover':
         if (store.ui.takeover) {
           store.releaseTakeover()
@@ -167,11 +177,32 @@ export function mount(root, store, options = {}) {
         break
       }
       case 'watch': {
-        const on = !(store.watching ?? []).includes(store.currentSessionId)
-        Promise.resolve(options.onWatch?.(store.currentSessionId, on)).then(() => {
-          store.watching = on ? [...(store.watching ?? []), store.currentSessionId] : (store.watching ?? []).filter((x) => x !== store.currentSessionId)
+        const sid = store.currentSessionId
+        if (typeof sid !== 'string' || sid === '') {
+          store.toast('还没接上会话，先打开一个会话再开手机批准', 'mark')
           store.emit()
-        }).catch(() => {})
+          break
+        }
+        if (typeof options.onWatch !== 'function') {
+          store.toast('这个环境没有审批通道', 'mark')
+          store.emit()
+          break
+        }
+        const on = !(store.watching ?? []).includes(sid)
+        store.watchInFlight += 1
+        Promise.resolve(options.onWatch(sid, on))
+          .then((res) => {
+            if (res && res.ok === false) throw new Error(res.error ?? '服务端拒绝')
+            store.watching = on ? [...(store.watching ?? []), sid] : (store.watching ?? []).filter((x) => x !== sid)
+            store.toast(on ? '手机批准已开：这个会话的审批会等你' : '手机批准已关', 'ok')
+            store.emit()
+          })
+          .catch((error) => {
+            // 以前这里是空 catch，失败完全没反馈，表现就是「点了没反应」
+            store.toast(`手机批准没切成功：${error?.message ?? '未知原因'}`, 'mark')
+            store.emit()
+          })
+          .finally(() => { store.watchInFlight = Math.max(0, store.watchInFlight - 1) })
         break
       }
       case 'say': {
@@ -215,15 +246,41 @@ export function mount(root, store, options = {}) {
         break
       }
       case 'notify': {
-        try {
-          Notification.requestPermission().then((state) => {
-            store.toast(state === 'granted' ? '通知已开' : '浏览器没给通知权限', state === 'granted' ? 'ok' : 'mark')
-            store.emit()
-          })
-        } catch {
-          store.toast('这个环境不支持通知', 'mark')
+        // 安卓壳里没有 Web Notification，但前台服务有通知通道：先走桥。
+        const bridge = typeof globalThis === 'object' ? globalThis.DSHPocket : null
+        if (bridge && typeof bridge.notify === 'function') {
+          try {
+            bridge.notify('DSH 通知测试', '能看到这条，说明通知通道是通的')
+            store.toast('已通过 App 通知通道发送', 'ok')
+          } catch {
+            store.toast('App 通知通道没响应', 'mark')
+          }
+          store.emit()
+          break
+        }
+        if (typeof Notification === 'undefined') {
+          store.toast('这个环境没有通知能力：浏览器要 HTTPS + 授权，安卓请用 App 打开', 'mark')
+          store.emit()
+          break
+        }
+        const report = (state) => {
+          store.toast(state === 'granted' ? '通知已开' : '浏览器没给通知权限', state === 'granted' ? 'ok' : 'mark')
           store.emit()
         }
+        if (Notification.permission === 'granted') {
+          try {
+            new Notification('DSH 通知测试', { body: '能看到这条就说明通了', tag: 'dsh-remote-panel' })
+            report('granted')
+          } catch {
+            store.toast('系统把通知挡掉了', 'mark')
+            store.emit()
+          }
+          break
+        }
+        Promise.resolve(Notification.requestPermission()).then(report).catch(() => {
+          store.toast('请求通知权限失败', 'mark')
+          store.emit()
+        })
         break
       }
       case 'focus':
@@ -319,6 +376,13 @@ export function mount(root, store, options = {}) {
       store.ui.acceptance.status, store.ui.interventions.length, local.diffMode, local.previewSide,
       store.ui.highlight, store.ui.acceptance.excluded.size,
       d.files.map((f) => `${f.path}${f.ignored}${f.reverted}${f.sensitive}`).join(','),
+      // 摘要页的内容也会变，必须进签名，否则「点了按钮状态变了但页面不重绘」：
+      // 手机批准开关、待批准列表、其他会话、当前跟随的会话都属于这类。
+      // 这是「手机批准点不动」的真正原因——状态早就改了，只是页面没重画。
+      store.currentSessionId ?? '',
+      (store.watching ?? []).join(','),
+      (store.approvals ?? []).map((a) => a.id).join(','),
+      ((store.overview && store.overview.sessions) || []).map((x) => `${x.id}:${x.level}`).join(','),
     ].join('|')
 
     if (sig !== local.sig) {
@@ -369,7 +433,8 @@ function renderNavbar(el, d, store) {
   const tabName = { sessions: '会话', now: '现在', changes: '变更', accept: '验收' }[view] ?? '监看'
   const backLabel = detail ? (detail.kind === 'preview' ? '验收' : '变更') : '对话'
   const title = detail ? (detail.kind === 'preview' ? '结果预览' : baseName(detail.id)) : tabName
-  const sig = [backLabel, title, takeover, Boolean(detail)].join('|')
+  const live = store.live === true
+  const sig = [backLabel, title, takeover, Boolean(detail), live].join('|')
   if (el._sig === sig) return
   el._sig = sig
   el.innerHTML = `
@@ -381,7 +446,11 @@ function renderNavbar(el, d, store) {
       ? detail.kind === 'preview'
         ? '<span class="nav-action" aria-hidden="true"></span>'
         : `<button class="nav-action" data-act="sheet" data-long="${detail.kind}" data-id="${esc(detail.id)}" aria-label="更多">${icon('more')}</button>`
-      : `<button class="nav-action ${takeover ? 'destructive' : ''}" data-act="takeover">${takeover ? '释放' : '接管'}</button>`}
+      : live
+        // 真实会话里没有「接管/释放」这回事：能做的只有让 agent 停手。
+        // 以前点了「接管」只改本地标志位，agent 照跑，所以看起来完全没效果。
+        ? '<button class="nav-action destructive" data-act="stop-run">停手</button>'
+        : `<button class="nav-action ${takeover ? 'destructive' : ''}" data-act="takeover">${takeover ? '释放' : '接管'}</button>`}
   `
 }
 
@@ -476,6 +545,33 @@ function renderSummary(d, store) {
       </div>
     </div>`
 
+  // 跨工作区的其他会话：列表来自宿主的全局会话表，不只当前工作区。
+  // 一次只能跟随一个，但这里能看到谁在等你、谁在跑，点一下切过去。
+  const overview = store.overview
+  const others = ((overview && overview.sessions) || []).filter((item) => item.id !== store.currentSessionId)
+  const levelSub = (item) => {
+    if (item.level === 'pending') return `等你处理${item.pending ? ` · ${item.pending}` : ''}`
+    if (item.level === 'done') return '已完成，还没看'
+    if (item.level === 'stale') return '可能卡住了'
+    if (item.level === 'running') return '在跑'
+    return '空闲'
+  }
+  const levelColor = (item) => (item.level === 'pending' ? 'orange' : item.level === 'done' ? 'green' : item.level === 'stale' ? 'orange' : item.level === 'running' ? 'blue' : 'gray')
+  const workspaceOf = (item) => String(item.cwd || '').replace(/\/+$/, '').split('/').filter(Boolean).pop() || '未命名工作区'
+  const waiting = others.filter((item) => item.level === 'pending' || item.level === 'done' || item.level === 'stale')
+  const runningOthers = others.filter((item) => item.level === 'running')
+  const spotlight = [...waiting, ...runningOthers].slice(0, 3)
+  const othersCard = spotlight.length === 0 ? '' : `<p class="section-title">其他会话${waiting.length > 0 ? `（${waiting.length} 个等你）` : `（${runningOthers.length} 个在跑）`}</p>
+    <div class="group">${spotlight.map((item) => `
+      <button class="row" data-act="session" data-id="${esc(item.id)}">
+        <span class="row-icon ${levelColor(item)}">${icon(item.level === 'pending' ? 'warn' : item.level === 'done' ? 'check' : 'wave')}</span>
+        <div class="row-main">
+          <span class="row-title">${esc(item.title)}</span>
+          <span class="row-sub">${esc(workspaceOf(item))} · ${esc(levelSub(item))}</span>
+        </div>
+        <span class="chevron">${icon('chevron')}</span>
+      </button>`).join('')}</div>`
+
   const stopCard = busy ? `<div class="group">
       <button class="row" data-act="say" data-text="先停下">
         <span class="row-icon gray">${icon('stop')}</span>
@@ -512,6 +608,7 @@ function renderSummary(d, store) {
     </div>
     ${approveCard}
     ${place ? statusCard : emptyCard}
+    ${othersCard}
     ${changesCard}
     ${stopCard}
     <p class="section-title">设置</p>

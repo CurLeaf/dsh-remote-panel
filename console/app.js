@@ -37,7 +37,7 @@ export function mountConsole(root, options = {}) {
   const unsubscribe = live && typeof live.subscribe === 'function' ? live.subscribe((state) => store.setLive(state)) : null
   const dispose = mount(root, store, {
     ...options,
-    onTakeover: () => { if (live && typeof live.cancel === 'function') live.cancel() },
+    onTakeover: () => (live && typeof live.cancel === 'function' ? live.cancel() : false),
     onSelectSession: (id) => { if (live && typeof live.select === 'function') live.select(id) },
     onSend: (text) => (live && typeof live.send === 'function' ? live.send(text) : false),
     onApprove: (id, decision) => options.approvals?.decide?.(id, decision),
@@ -60,7 +60,11 @@ export function mountConsole(root, options = {}) {
           if (next.length > before && typeof document !== 'undefined' && document.hidden === true) {
             notify(`有 ${next.length} 个任务等你批准`, next.map((p) => p.toolName).slice(0, 3).join('、'))
           }
-          store.watching = Array.isArray(body?.watching) ? body.watching : []
+          // 用户刚点了「手机批准」且请求还在飞：别用上一轮的旧值把它盖回去，
+          // 否则表现就是「点了没反应」（3 秒后被轮询重置）。
+          if (store.watchInFlight === 0) {
+            store.watching = Array.isArray(body?.watching) ? body.watching : []
+          }
           store.emit()
         })
         .catch(() => { /* 宿主还没重启 / 路由不存在：静默 */ })

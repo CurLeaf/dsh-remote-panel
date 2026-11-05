@@ -55,8 +55,26 @@ export function createSessionSource(sessions, uiSession = null) {
       const list = sessions.list.getSnapshot()
       const rows = list && list.byId ? Object.values(list.byId) : []
       const found = rows.find((row) => (row.retainedBy?.mainView ?? 0) > 0)?.id ?? null
-      if (found !== null) lastId = found
-      return found ?? lastId
+      if (found !== null) {
+        lastId = found
+        return found
+      }
+      // 上次看到的那个还活着就继续用它
+      if (lastId !== null && rows.some((row) => row.id === lastId)) return lastId
+      // 手机上通常直接打开监看面板，主视图没有被 retain 的会话。
+      // 这时不能返回 null（面板会永远空着，「正在执行的也看不到」），
+      // 退到总览里最需要看的那一个：先等你处理，再在跑，再最新。
+      const overview = buildOverview({
+        rows,
+        status: uiSession?.sessionStatus?.getSnapshot?.() ?? null,
+        currentId: null,
+      })
+      const best =
+        overview.sessions.find((item) => item.level === 'pending') ??
+        overview.sessions.find((item) => item.level === 'running') ??
+        overview.sessions[0] ??
+        null
+      return best?.id ?? null
     } catch {
       return null
     }
