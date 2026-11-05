@@ -95,7 +95,11 @@
 			}
 			# 关键：不重写 Host/Origin。DSH 通过 --trusted-host 接受这个 authority，
 			# Cookie 因此天然同源，不需要任何注入或伪造。
-			reverse_proxy 127.0.0.1:@@UPSTREAM_PORT@@
+			# SSE（/plugins/events、/api/todo-center/events）必须逐帧下发：
+			# 默认响应缓冲会攒批，前端表现就是「卡住 / 断流 / turn 变 interrupted」。
+			reverse_proxy 127.0.0.1:@@UPSTREAM_PORT@@ {
+				flush_interval -1
+			}
 		}
 
 		handle {

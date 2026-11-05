@@ -28,6 +28,7 @@ sed -e "s#https://10.140.140.223:8710#${SERVER}#" -e "s#K7mQ2vT9pLxR4nW8sZbY3cHd
 javac -encoding UTF-8 -source 17 -target 17 -nowarn \
   -classpath "$AJAR" -d "$OUT/classes" \
   "$OUT/MainActivity.java" \
+  "$APP/src/dev/curleaf/dshpocket/Updater.java" \
   "$APP/src/dev/curleaf/dshpocket/PocketNotify.java" \
   "$APP/src/dev/curleaf/dshpocket/KeepAliveService.java" \
   "$OUT/gen/dev/curleaf/dshpocket/R.java"
@@ -43,3 +44,17 @@ zip -q -j "$OUT/base.apk" "$OUT/dex/classes.dex"
 "$BT/apksigner" sign --ks "$SDK/debug.keystore" --ks-pass pass:android --key-pass pass:android \
   --out "dsh-pocket.apk" "$OUT/aligned.apk"
 echo "APK: $(pwd)/dsh-pocket.apk ($(du -h dsh-pocket.apk | cut -f1))"
+
+# 顺带生成自更新用的版本清单，供中继侧 /version.json 直接读
+VC=$(grep -oP 'versionCode="\K[0-9]+' "$APP/AndroidManifest.xml")
+VN=$(grep -oP 'versionName="\K[^"]+' "$APP/AndroidManifest.xml")
+SHA=$(sha256sum dsh-pocket.apk | cut -d" " -f1)
+SIZE=$(stat -c %s dsh-pocket.apk)
+ASSETS="${ASSETS_DIR:-$HOME/WorkSpace/dsh-tunnel/assets}"
+mkdir -p "$ASSETS"
+cp dsh-pocket.apk "$ASSETS/app.apk"
+cat > "$ASSETS/version.json" <<JSON
+{"versionCode":$VC,"versionName":"$VN","apk":"/app.apk","size":$SIZE,"sha256":"$SHA","notes":"修复：证书校验收紧为系统 CA；新增：启动自动检查更新"}
+JSON
+echo "version.json: versionCode=$VC versionName=$VN size=$SIZE"
+echo "已同步到 $ASSETS/{app.apk,version.json}"

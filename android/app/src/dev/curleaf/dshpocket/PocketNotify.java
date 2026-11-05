@@ -21,6 +21,9 @@ import android.os.Build;
 public final class PocketNotify {
 	public static final String CHANNEL_ALERTS = "dsh-pocket-alerts";
 	public static final String CHANNEL_KEEPALIVE = "dsh-pocket-keepalive";
+	/** 更新提示单独走一条低打扰通道：不该和「任务提醒」抢优先级 */
+	public static final String CHANNEL_UPDATE = "dsh-pocket-update";
+	private static final int UPDATE_ID = 7102;
 	private static final int KEEPALIVE_ID = 7001;
 	private static final int ALERT_ID = 7002;
 
@@ -37,6 +40,26 @@ public final class PocketNotify {
 		NotificationChannel keep = new NotificationChannel(CHANNEL_KEEPALIVE, "保持连接", NotificationManager.IMPORTANCE_LOW);
 		keep.setDescription("让 DSH 在后台保持连接，才能及时收到提醒");
 		manager.createNotificationChannel(keep);
+		NotificationChannel upd = new NotificationChannel(CHANNEL_UPDATE, "版本更新", NotificationManager.IMPORTANCE_DEFAULT);
+		upd.setDescription("有新版本可用时提醒你，不会自动安装");
+		manager.createNotificationChannel(upd);
+	}
+
+	/** 更新提示：低打扰、不自动安装，点一下回到 App 自己决定。 */
+	public static void postUpdate(Context context, String title, String body) {
+		ensureChannels(context);
+		NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+		if (manager == null) return;
+		Intent open = new Intent(context, MainActivity.class);
+		open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+		PendingIntent tap = PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+		Notification.Builder builder = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(context, CHANNEL_UPDATE) : new Notification.Builder(context);
+		builder.setSmallIcon(android.R.drawable.stat_sys_download_done)
+			.setContentTitle(title == null ? "DSH 有新版本" : title)
+			.setContentText(body == null ? "" : body)
+			.setAutoCancel(true)
+			.setContentIntent(tap);
+		manager.notify(UPDATE_ID, builder.build());
 	}
 
 	/** 普通通知：点一下回到 App。 */

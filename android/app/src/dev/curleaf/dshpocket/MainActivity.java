@@ -25,11 +25,18 @@ import android.webkit.WebViewClient;
  * 里面带着当前进程的令牌，会先种门禁 Cookie 再跳到带令牌的首页。
  */
 public class MainActivity extends Activity {
-	private static final String SERVER = "https://10.140.140.223:8710";
-	private static final String SERVER_HOST = "10.140.140.223";
-	/** 门禁口令：启动时先过 /pair 拿到 Cookie，再由 Caddy 发带令牌的跳转页。 */
+	private static final String SERVER = "https://home.43-155-239-141.sslip.io";
+	private static final String SERVER_HOST = "home.43-155-239-141.sslip.io";
+	/** 门禁口令：启动时带 ?k= 过门禁，中继侧自动跳转换取 DSH 会话。 */
 	private static final String ACCESS_KEY = "K7mQ2vT9pLxR4nW8sZbY3cHd";
-	private static final String START = SERVER + "/pair?k=" + ACCESS_KEY;
+	private static final String START = SERVER + "/?k=" + ACCESS_KEY;
+	/** 启动时查一次新版本；比自己新就提示更新（失败静默，不打扰打开 DSH） */
+	private static final String VERSION_URL = SERVER + "/version.json";
+	private static final String APK_URL = SERVER + "/app.apk?k=" + ACCESS_KEY;
+	/** 发现新版本时出现的轻提示（不弹窗）；点击后才进入更新确认 */
+	private TextView updateChip;
+	private String pendingVersionName;
+	private String pendingNotes;
 	/** 主文档连续失败几次后放弃自动重试，改成带「重试」按钮的失败页 */
 	private static final int MAX_RETRIES = 2;
 	/** 页面底色（DSH 深色主题的 --dsh-boot-bg），加载期间不闪白 */
@@ -122,9 +129,8 @@ public class MainActivity extends Activity {
 
 			@Override
 			public void onReceivedSslError(WebView view, android.webkit.SslErrorHandler handler, android.net.http.SslError error) {
-				// 只对「我们自己的站点」放行：证书是 Caddy 内部 CA 签的，
-				// 有的 ROM 的 WebView 不认用户凭据里的根证书，硬拦会直接白屏。
-				// 注意要比对 URL 里的 host（error.getUrl() 是完整 URL，不能直接 startsWith 主机名）。
+				// 证书已改为 Let's Encrypt 公共 CA，系统信任即可，**不再对本站放行**。
+				// 保留无条件 proceed 等于绕过所有证书校验，那是内部 CA 时代的权宜之计。
 				String url = error.getUrl() == null ? "" : error.getUrl();
 				String host = "";
 				try {
@@ -132,12 +138,9 @@ public class MainActivity extends Activity {
 				} catch (Exception ignored) {
 					// 解析不了就当外站处理
 				}
-				if (SERVER_HOST.equals(host)) {
-					handler.proceed();
-					return;
-				}
 				handler.cancel();
-				showError("证书不受信任：" + host + "\n" + url);
+				showError("证书校验失败：" + host + "\n" + url
+					+ "\n\n如果手机时间不对，请先校正时间再试。");
 			}
 
 			@Override
@@ -193,6 +196,10 @@ public class MainActivity extends Activity {
 		installImeInsets();
 		hideSystemBars();
 		web.loadUrl(START);
+		// 页面先出来，版本检查放后台；**只做静默检查，不弹任何窗**
+		web.postDelayed(new Runnable() {
+			@Override public void run() { checkUpdateSilently(); }
+		}, 2500L);
 	}
 
 	@Override
@@ -298,6 +305,61 @@ public class MainActivity extends Activity {
 		web.post(() -> {
 			if (web != null) web.evaluateJavascript(js, null);
 		});
+	}
+
+	/**
+	 * 静默检查更新：发现新版本只在界面左下角挂一个可点的小条 + 一条低优先级通知，
+	 * 绝不主动弹窗。是否更新完全由用户点那一下决定。
+	 */
+	private void checkUpdateSilently() {
+		Updater.checkAsync(this, VERSION_URL, APK_URL, new Updater.OnUpdate() {
+			@Override public void found(String versionName, String notes, String apkUrl) {
+				pendingVersionName = versionName;
+				pendingNotes = notes;
+				showUpdateChip("有新版本 " + versionName + " · 点此更新");
+				notifyOncePerVersion(versionName);
+			}
+		});
+	}
+
+	/** 每次启动都会查到新版本，但通知只在「这个版本号第一次见到」时发一次 */
+	private void notifyOncePerVersion(String versionName) {
+		try {
+			String seen = getPreferences(MODE_PRIVATE).getString("notified_update", "");
+			if (versionName.equals(seen)) return;
+			getPreferences(MODE_PRIVATE).edit().putString("notified_update", versionName).apply();
+			PocketNotify.postUpdate(this, "DSH 有新版本 " + versionName, "点一下回到 App，在左下角选择是否更新");
+		} catch (Throwable ignored) { }
+	}
+
+	private void showUpdateChip(String text) {
+		if (updateChip != null) { updateChip.setText(text); updateChip.setVisibility(View.VISIBLE); return; }
+		float d = getResources().getDisplayMetrics().density;
+		updateChip = new TextView(this);
+		updateChip.setText(text);
+		updateChip.setTextSize(12.5f);
+		updateChip.setTextColor(0xFF4ADE80);
+		updateChip.setPadding((int)(14*d), (int)(9*d), (int)(14*d), (int)(9*d));
+		updateChip.setGravity(Gravity.CENTER);
+		updateChip.setClickable(true);
+		updateChip.setOnClickListener(v -> {
+			if (pendingVersionName == null) { checkUpdateSilently(); return; }
+			Updater.showDialog(MainActivity.this, pendingVersionName, pendingNotes, APK_URL);
+		});
+		// 圆角深色底 + 细边，和页面配色一致
+		android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+		bg.setColor(0xF21D1D21);
+		bg.setCornerRadius(999f);
+		bg.setStroke((int)(1*d), 0xFF33333A);
+		updateChip.setBackground(bg);
+		updateChip.setElevation(6f * d);
+
+		FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+			FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+			Gravity.BOTTOM | Gravity.START);
+		// 抬到输入框上方，避免和 DSH 底部编辑区打架
+		lp.setMargins((int)(14*d), 0, 0, (int)(132*d));
+		root.addView(updateChip, lp);
 	}
 
 	@Override

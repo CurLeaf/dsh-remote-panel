@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 默认只信系统 CA；我们用的是 Caddy 内部 CA，装在「用户凭据」里，
-     所以这里显式把 user 也加进来，否则 WebView 会报证书错误。 -->
+<!-- 证书已是 Let's Encrypt 公共 CA，只信系统 CA 即可。
+     不再信任「用户凭据」：那会让任何装进手机的根证书都能劫持这个 App 的流量。 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
-            <certificates src="user" />
         </trust-anchors>
     </base-config>
 </network-security-config>
