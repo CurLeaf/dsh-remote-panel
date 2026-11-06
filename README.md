@@ -94,7 +94,7 @@ npm run tunnel:print     # 只渲染，不落盘
 
 ```bash
 GATE=<门禁口令> npm run tunnel:verify                       # 打真实公网入口，9 项
-DSH_COOKIE='dsh-auth-...=v1...' node test/tunnel/edge.mjs   # 边缘层单测，不经过公网
+DSH_COOKIE='dsh-auth-...=v1...' node test/tunnel/edge.mjs   # 边缘层单测（11 项，含取消流后存活）
 KEY=<口令> TOKEN=<token> CDP=http://127.0.0.1:9222 npm run tunnel:measure
 ```
 

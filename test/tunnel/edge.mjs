@@ -155,6 +155,26 @@ try {
   ok('SSE 流式转发')
 } catch (e) { bad('SSE 流式转发', e.message) }
 
+// 4c. 客户端中途取消流：边缘必须活着（曾经会因为 respond 抛 ERR_HTTP2_INVALID_STREAM 把进程带走）
+try {
+  await new Promise((resolve) => {
+    const client = http2.connect(`https://127.0.0.1:${PORT}`, { rejectUnauthorized: false, servername: HOST })
+    const req = client.request({ ':path': '/plugins/events', ':method': 'GET', ':authority': HOST, ...authHeader })
+    req.on('error', () => {})
+    setTimeout(() => {
+      req.close(http2.constants.NGHTTP2_CANCEL)
+      client.close()
+      resolve()
+    }, 300)
+    req.end()
+  })
+  // 给边缘一点时间处理取消事件
+  await new Promise((r) => setTimeout(r, 500))
+  const after = await h1request('/', { headers: authHeader })
+  if (after.status === 200) ok('客户端取消流后边缘仍存活')
+  else bad('客户端取消流后边缘仍存活', `status=${after.status}`)
+} catch (e) { bad('客户端取消流后边缘仍存活', e.message) }
+
 // 5. 门禁
 try {
   const r = await h2request('/', { 'accept': 'text/html' })
