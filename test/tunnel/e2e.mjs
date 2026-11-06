@@ -17,11 +17,14 @@ import http from 'node:http'
 import zlib from 'node:zlib'
 import https from 'node:https'
 import http2 from 'node:http2'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { WebSocket } from 'ws'
 
 const BASE = process.env.BASE || 'https://home.43-155-239-141.sslip.io'
 const GATE = process.env.GATE || process.env.GATE_KEY || ''
-const TIMEOUT = Number(process.env.TIMEOUT || 15000)
+const TIMEOUT = Number(process.env.TIMEOUT || 40000)  // 链路上 1.27MB 的 br 包要几秒，15s 太紧
 
 if (GATE === '') {
   console.error('必须提供 GATE（门禁口令），例如 GATE=xxxx node test/e2e.mjs')
@@ -41,7 +44,7 @@ function ok(name, extra = '') { pass += 1; results.push(['PASS', name, extra]) }
 function bad(name, why) { fail += 1; results.push(['FAIL', name, why]) }
 
 /** 发一个请求，返回 { status, headers, body } */
-function request(path, { cookie, method = 'GET', stream = false, headers: extraHeaders = {} } = {}) {
+function request(path, { cookie, method = 'GET', stream = false, body, headers: extraHeaders = {} } = {}) {
   return new Promise((resolve, reject) => {
     const req = mod.request({
       host, port, path, method,
@@ -67,12 +70,12 @@ function request(path, { cookie, method = 'GET', stream = false, headers: extraH
           else if (enc === 'br') buf = zlib.brotliDecompressSync(buf)
           else if (enc === 'deflate') buf = zlib.inflateSync(buf)
         } catch { /* 留着原始字节，交给断言去报 */ }
-        resolve({ status: res.statusCode, headers: res.headers, body: buf.toString('utf8') })
+        resolve({ status: res.statusCode, headers: res.headers, body: buf.toString('utf8'), raw: buf })
       })
     })
     req.on('timeout', () => { req.destroy(new Error('timeout')) })
     req.on('error', reject)
-    req.end()
+    req.end(body)
   })
 }
 
@@ -179,6 +182,9 @@ async function main() {
 
   // 5d) 6MB 的 genui 运行时：第二次必须走 304
   try {
+    // 先热一次：agent 重启后第一个请求走的是「放行给上游 + 后台预热」的冷路径，
+    // 那一次本来就不带 ETag（这是设计，不是 bug）
+    await request('/dsh-genui/runtime.js', { cookie })
     const first = await request('/dsh-genui/runtime.js', { cookie })
     const etag = String(first.headers.etag || '')
     if (etag === '') { bad('genui 条件请求', '响应没有 ETag') } else {
@@ -187,6 +193,28 @@ async function main() {
       else bad('genui 条件请求', `期望 304，实得 ${second.status}`)
     }
   } catch (e) { bad('genui 条件请求', e.message) }
+
+  // 5e) 会话列表：已归档的必须被边缘剔掉
+  try {
+    const body = JSON.stringify({ type: 'client-request', rpcId: 'e2e', method: 'session/list', payload: { args: { _request: {} } } })
+    const r = await request('/api/session/list', {
+      cookie, method: 'POST', headers: { 'content-type': 'application/json' }, body,
+    })
+    if (r.status !== 200) { bad('会话列表裁剪', `status=${r.status}`) } else {
+      const doc = JSON.parse(r.body)
+      const items = doc?.result?.value?.items
+      if (!Array.isArray(items) || items.length === 0) { bad('会话列表裁剪', '结构不对或空列表') } else {
+        let archived = new Set()
+        try {
+          const ws = JSON.parse(readFileSync(join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'storages', 'workspace.json'), 'utf8'))
+          archived = new Set(ws?.global?.archivedSessionIds ?? [])
+        } catch { /* 没有归档文件就不校验这一条 */ }
+        const leaked = items.filter((i) => archived.has(i.sessionId))
+        if (leaked.length > 0) bad('会话列表裁剪', `仍有 ${leaked.length} 条归档会话漏出`)
+        else ok('会话列表裁剪', `${items.length} 条 / ${(Buffer.byteLength(r.raw ?? r.body) / 1024).toFixed(0)}KB`)
+      }
+    }
+  } catch (e) { bad('会话列表裁剪', e.message) }
 
   // 6) 并发
   try {

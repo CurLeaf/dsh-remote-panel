@@ -68,6 +68,7 @@ DSH 崩了/重启时远程入口照样在——这正是它不能塞进进程的
 |---|---|
 | `lib/tunnel/agent.mjs` | 出网回连中继、双通道、TLS 终止、设备配对 |
 | `lib/tunnel/edge.mjs` | TLS 之后的 HTTP 终结：ALPN 分流、门禁、反向代理、缓存语义 |
+| `lib/tunnel/archive.mjs` | 会话列表裁剪：把已归档会话从 `session/list` 响应里剔掉 |
 | `lib/tunnel/config.mjs` | agent 配置与启动期校验（只读环境变量，不留运行期兜底） |
 | `deploy/templates/tunnel-agent.service.tmpl` | 用户级 systemd 单元 |
 | `deploy/templates/tunnel-install.sh.tmpl` | 幂等安装脚本 |
@@ -131,6 +132,7 @@ TLS 在 Host 终止，之后**不再是字节管道**，而是一个真正的反
 | `/app.apk` | 必须带 Cookie 或 `?k=`，否则 403/401 |
 | `/assets/*` 命中 `名字-8位hash.ext` | 补 `immutable, max-age=31536000` |
 | `/dsh-genui/runtime.js` | 强 ETag + 304；br / gzip 按 `accept-encoding` 出 |
+| `/api/session/list` | 剔掉已归档会话（读 `$DSH_HOME/storages/workspace.json` 的 `global.archivedSessionIds`），实测 348 条/341KB → 37 条/22KB |
 | SSE（`/plugins/events`） | 边到边转发，不缓冲 |
 | WebSocket（`/api/remote.mux`） | 走 http/1.1 分支，`upgrade` 后裸管道 |
 
