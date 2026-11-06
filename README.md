@@ -31,7 +31,7 @@ dsh plugin --profile web add dsh-remote-panel
                              └  用户级服务，无 root          └  通过 --trusted-host 接受该 authority
 ```
 
-三个部件、一条边界：
+三个部件、一条边界（另一条 **公网隧道** provider 见下一节）：
 
 | 部件 | 职责 | 权限 |
 |---|---|---|
@@ -46,6 +46,95 @@ dsh plugin --profile web add dsh-remote-panel
 - 若把反代也塞进进程，就得自己实现 TLS/WS/门禁，等于把成熟的 Caddy 换成几百行自研代码。
 
 ---
+
+## 公网隧道 provider（dsh-tunnel）
+
+上面那套是「组网 + Caddy」：手机要装 EasyTier、加入虚拟网络才能连。这套是另一条：
+**一个公网 HTTPS 地址直接打开**，手机什么都不用装。
+
+```
+手机浏览器 ──TLS(h2)──▶ 中继 43.x:443 ──SNI 盲转──▶ Host agent ──HTTP──▶ 127.0.0.1:3080
+                                                        │
+                                                        └ 门禁 + 边缘层（缓存/压缩/h2 终结）
+```
+
+**agent 的源码就在本插件里**（`lib/tunnel/`），而中继（VPS 侧：SNI 分流、设备台账、控制台、证书）
+在 [`../dsh-tunnel/`](../dsh-tunnel/)。这边是唯一的 Host 侧真源，升级就是升级插件本身。
+
+注意「代码在插件里」不等于「进程在插件里」：agent 仍是独立的用户级 systemd 单元，
+DSH 崩了/重启时远程入口照样在——这正是它不能塞进进程的原因（见上一节）。
+
+| 文件 | 作用 |
+|---|---|
+| `lib/tunnel/agent.mjs` | 出网回连中继、双通道、TLS 终止、设备配对 |
+| `lib/tunnel/edge.mjs` | TLS 之后的 HTTP 终结：ALPN 分流、门禁、反向代理、缓存语义 |
+| `lib/tunnel/config.mjs` | agent 配置与启动期校验（只读环境变量，不留运行期兜底） |
+| `deploy/templates/tunnel-agent.service.tmpl` | 用户级 systemd 单元 |
+| `deploy/templates/tunnel-install.sh.tmpl` | 幂等安装脚本 |
+| `lib/deploy/tunnel-cli.mjs` | `install` / `status` / `print` |
+
+### 安装与升级
+
+```bash
+# 第一次：给参数，之后会落到 ~/.config/dsh-tunnel/agent.json（0600）
+RELAY_URL=wss://relay.<域>/agent \
+TUNNEL_HOSTNAME=home.<域> \
+GATE_KEY=<门禁口令> \
+CONSOLE_URL=https://admin.<域>/ \
+npm run tunnel:install
+
+npm run tunnel:status    # 单元状态 + 最近日志 + 公网探活
+npm run tunnel:print     # 只渲染，不落盘
+```
+
+升级插件后重跑 `tunnel:install` 即可：单元里的路径不变，等价于刷新单元并重启。
+（旧的 `dsh-tunnel-agent.service` 已经移除，不再有第二份 agent 代码或第二条启动路径。）
+
+### 验证
+
+```bash
+GATE=<门禁口令> npm run tunnel:verify                       # 打真实公网入口，9 项
+DSH_COOKIE='dsh-auth-...=v1...' node test/tunnel/edge.mjs   # 边缘层单测，不经过公网
+KEY=<口令> TOKEN=<token> CDP=http://127.0.0.1:9222 npm run tunnel:measure
+```
+
+### 边缘层（agent 里，TLS 之后）
+
+TLS 在 Host 终止，之后**不再是字节管道**，而是一个真正的反向代理（`lib/tunnel/edge.mjs`）：
+
+```
+浏览器 ──TLS(h2 或 1.1, ALPN 协商)──▶ agent
+                                   ├─ alpn=h2   → http2 server ─┐
+                                   └─ 其余      → http server  ─┤（WebSocket 走这条）
+                                                                ▼
+                                                    门禁 → 反向代理 → 127.0.0.1:3080
+```
+
+为什么必须这样：
+
+- **6 条连接的天花板**。字节管道下，一条浏览器连接换一条上游连接，HTTP/1.1 同源只有 6 条。
+  首屏 5.7MB 的插件包会把会话列表这种小请求堵在队列里十几秒——手机上就是「半天转圈」。
+  改成 h2 后小响应各自成流，不再排队。
+- **缓存语义得有人补**。DSH 给内容寻址的 `/assets/*` 没发缓存头，`/dsh-genui/runtime.js`
+  （6MB）写死 `no-cache` 又没有 ETag。边缘层补：前者 `immutable`，后者持有内容算强 ETag，
+  之后每次进入只花一个 304 往返（约 150 字节），顺带用 brotli 出 1.27MB（原 gzip 1.7MB）。
+- **上游就是本机回环，不需要连接池**。实测 100 条请求池化 71~108ms、每次新建 90~94ms，
+  收益为零，却会撞上 DSH 的 5s keepalive 关闭竞态（复用正要被对端关掉的 socket → 请求挂住）。
+
+行为约定：
+
+| 场景 | 结果 |
+|---|---|
+| 门禁未通过 | 401（浏览器要 HTML 就给能输口令的页面，其余给一行文本） |
+| `?k=<口令>` | 303 + 一年期 `dsh_gate` Cookie，同时带上 `/?token=` 少一跳 |
+| PWA 资源（manifest / sw.js / 图标 / version.json） | 免门禁，边缘直出 |
+| `/app.apk` | 必须带 Cookie 或 `?k=`，否则 403/401 |
+| `/assets/*` 命中 `名字-8位hash.ext` | 补 `immutable, max-age=31536000` |
+| `/dsh-genui/runtime.js` | 强 ETag + 304；br / gzip 按 `accept-encoding` 出 |
+| SSE（`/plugins/events`） | 边到边转发，不缓冲 |
+| WebSocket（`/api/remote.mux`） | 走 http/1.1 分支，`upgrade` 后裸管道 |
+
+慢请求（>1.5s）会打一行日志，标明「上游首字节 / 全程 / 字节数」，用来区分慢在边缘→上游还是边缘→浏览器。
 
 ## 手机监看：执行处置台
 
@@ -230,6 +319,15 @@ dsh plugin --profile web remove dsh-remote-panel
 ```
 
 `--uninstall` 会停并删两个单元与配置，**不删**二进制（可能被别的用途复用）。
+
+公网隧道那条另算：
+
+```bash
+systemctl --user disable --now dsh-remote-panel-tunnel
+rm -f ~/.config/systemd/user/dsh-remote-panel-tunnel.service
+rm -rf ~/.config/dsh-tunnel          # 设备令牌与证书缓存
+systemctl --user daemon-reload
+```
 
 ---
 

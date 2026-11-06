@@ -1,0 +1,20 @@
+[Unit]
+Description=dsh-remote-panel tunnel agent (outbound relay link)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=RELAY_URL=@@RELAY_URL@@
+Environment=TARGET_PORT=@@TARGET_PORT@@
+Environment=TUNNEL_HOSTNAMES=@@HOSTNAME@@
+Environment=GATE_KEY=@@GATE_KEY@@
+Environment=CERT_SYNC=1
+Environment=CERT_SYNC_HOST=@@CERT_SYNC_HOST@@
+Environment=CONSOLE_URL=@@CONSOLE_URL@@
+ExecStart=@@NODE_BIN@@ @@AGENT_PATH@@
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

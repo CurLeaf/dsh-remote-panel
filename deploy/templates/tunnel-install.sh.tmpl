@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# dsh-remote-panel: 安装/升级 tunnel agent（用户级 systemd，无需 root）
+# 生成者：dsh-remote-panel @@VERSION@@
+#
+# 幂等：重复执行只会覆盖单元文件并重启，不会重复创建任何东西。
+# 升级路径就是「插件升级后重跑本脚本」——agent 代码在插件里，跟着插件走。
+set -euo pipefail
+
+UNIT_DIR="$HOME/.config/systemd/user"
+UNIT="$UNIT_DIR/@@UNIT_NAME@@"
+STATE_DIR="$HOME/.config/dsh-tunnel"
+mkdir -p "$UNIT_DIR" "$STATE_DIR"
+
+cat > "$UNIT" <<'UNIT_EOF'
+@@UNIT_BODY@@
+UNIT_EOF
+chmod 644 "$UNIT"
+
+# 只在首次安装时生成设备令牌文件目录；令牌由 agent 自己写入（600）
+chmod 700 "$STATE_DIR" || true
+
+systemctl --user daemon-reload
+systemctl --user enable --now @@UNIT_NAME@@
+systemctl --user restart @@UNIT_NAME@@
+
+for _ in $(seq 1 20); do
+  if systemctl --user is-active --quiet @@UNIT_NAME@@; then break; fi
+  sleep 0.5
+done
+
+echo "--- 单元状态"
+systemctl --user is-active @@UNIT_NAME@@ || true
+
+echo "--- 最近日志"
+journalctl --user -u @@UNIT_NAME@@ -n 12 --no-pager || true
+
+echo ""
+echo "未配对时日志里会有 6 位配对码："
+echo "  journalctl --user -u @@UNIT_NAME@@ -n 30 | grep 配对码"
+echo "入口：@@PUBLIC_URL@@"
