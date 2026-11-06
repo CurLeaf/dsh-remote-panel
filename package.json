@@ -41,7 +41,8 @@
     "tunnel:install": "node lib/deploy/tunnel-cli.mjs install",
     "tunnel:status": "node lib/deploy/tunnel-cli.mjs status",
     "tunnel:verify": "node test/tunnel/e2e.mjs",
-    "tunnel:measure": "node tools/measure.mjs"
+    "tunnel:measure": "node tools/measure.mjs",
+    "tunnel:accept": "node tools/accept.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

@@ -94,10 +94,14 @@ npm run tunnel:print     # 只渲染，不落盘
 ### 验证
 
 ```bash
-GATE=<门禁口令> npm run tunnel:verify                       # 打真实公网入口，9 项
+npm run tunnel:accept                                       # 一键验收：结构 / 协议 / 会话列表 / 稳定性 / 重启恢复
+GATE=<门禁口令> npm run tunnel:verify                        # 只打公网功能面，10 项
 DSH_COOKIE='dsh-auth-...=v1...' node test/tunnel/edge.mjs   # 边缘层单测（11 项，含取消流后存活）
 KEY=<口令> TOKEN=<token> CDP=http://127.0.0.1:9222 npm run tunnel:measure
 ```
+
+`tunnel:accept` 是验收口径：它从 `~/.config/dsh-tunnel/agent.json` 读参数，自己用门禁口令换
+DSH Cookie，跑完会重启一次单元验证恢复，最后打印逐项 PASS/FAIL。
 
 ### 边缘层（agent 里，TLS 之后）
 
@@ -200,6 +204,7 @@ Caddy 的 `pki/authorities/local/root.crt`）。
 | DSH 升级 | hash 类名可能变 | 有契约自检（面板「外壳适配」灯），失配会显红而不是静默错位 |
 | 崩溃上报 | 无 | 壳里失败会显示错误文本；日志只有控制台 |
 | 无障碍 | 部分 | 抽屉没有焦点陷阱；aria 只覆盖了注入的按钮 |
+| 中继重连后可能卡死 | 待查 | 2026-11-06 11:42 观察到一次：agent 的两条 lane 被对端 1006 断开、2s 后自动重连并登记主机名成功，但随后 2 分钟里 `home.<域>` 的 TLS 握手始终完不成（浏览器侧表现为连接被直接关闭），重启 agent 立刻恢复。当时现象是「请求能到 agent、响应回不到浏览器」，怀疑中继重连后仍按旧 lane 回写。中继在 VPS 上且当前没有可用 SSH 凭据，只能等有权限时再查 |
 
 ## 安全模型：令牌只在门禁之后
 
