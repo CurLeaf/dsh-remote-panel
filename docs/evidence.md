@@ -16,6 +16,9 @@ chrome --headless=new --remote-debugging-port=9333 --remote-allow-origins='*' --
 
 被测环境：DSH `0.2.1-rc.3`，Chrome headless（`--headless=new`）。
 
+> 2026-11-07 起「监看」控制台（`console/`、`lib/client.console.*`、审批桥、断点接力）已整体删除，
+> 下文相关条目只作历史记录；现在的手机第三屏是宿主右栏面板，见文末当天条目。
+
 ## 2026-10-27 · 外壳 CSS 与选择器
 
 ### 选择器命中（390px，未装插件）
@@ -1719,3 +1722,34 @@ DSH 每次换构建都会换前缀，一换就整片失效（只能靠面板那�
 | 1281 桌面 | 网格 `280px 1000px 0px`、非对话层 `display:none`、`data-rp-source` 仍是 `semantic` |
 
 测试 209 条：208 pass / 0 fail / 1 skipped（新增 `/shell` 来源字段 3 条断言 + 客户端契约 2 条）。
+
+## 2026-11-07 · 第三屏换成宿主右栏：监看控制台整体下线
+
+**决策**：手机第三屏不再自绘监控页。用户要的是「桌面上那个右栏面板」——文件 / 终端 / Git / 浏览器 / 文档预览，
+不是一套只读的执行视图。监看连同它承载的手机批准桥、断点接力、后台通知一起删掉。
+
+**做法**：
+
+| 目的 | 端口 |
+|---|---|
+| 第三屏是宿主右栏 | `installPager` 把 `[data-rightbar-col]` 整列按 `(2 - page) × 屏宽` 平移（和侧栏、正文同一条轨道） |
+| 落地页 | `shell.overlay` 里的 `PanelsPage` 读 `ctx.sidebarRightTabs.guide()`，点一个入口 `ctx.sidebarRight.openTab(kind)` |
+| 让位 | 面板开时 `html.dsh-panels-open` 隐藏落地页；`[data-sidebar-right-open]` 一出现/消失就 `go(2)` / 回原页 |
+| 认标记 | 右栏写 `data-rp-page="panels"`；开合认宿主的 `data-sidebar-right-open`，不认 `P3OORG_*` 哈希类名 |
+| 删除 | `console/`（11 个文件）、`lib/client.console.*.js`、`tools/build-console.mjs`、`lib/approval-bridge.js`、`lib/relay.js`、`/pending` `/approve` `/watch` `/relay*` 路由、审批 waterfall |
+
+**实测（390×844，DPR 2，真 dsh web + 插件链路）**：
+
+| 检查 | 结果 |
+|---|---|
+| 左滑到第三页（未开面板） | `page=2`，`.dsh-page-panels` `visibility=visible`，5 个入口（工作区文件 / 新建终端 / Git / 设备预览 / Agent 浏览器） |
+| 点 Git 入口 | `[data-sidebar-right-open=true]`、`fullscreen`、`x=0 w=390`，落地页 `visibility=hidden` |
+| 收起右侧边栏 | 回 `page=2`，落地页重新可见（记住来源页） |
+| 对话页点「打开右侧边栏」 | 自动 `page=2`，面板 `x=0`；收起回 `page=1` |
+| 横屏 844×390（停靠态 380px） | 落地页点入口 → 翻回 `page=1`，面板 `x=464 w=380`（push），收起留在对话 |
+| 面板节点迟挂 / 右栏重挂 | 开机 0/120/480/1200/2800ms 各补认一次；右栏 childList 挂了观察器，列被换掉会重挂 |
+| 面板开着右滑 | `page=1`，面板 `x=390`（移出轨道但状态保留），再左滑回 `x=0` |
+| 旧监看 | `.pc-host` / `.dsh-page-console` 计数 0，抽屉里没有「监看」行 |
+| 旧路由 | `/remote-panel/api/pending`、`/relay`、`/watch` 全 404 |
+
+测试 169 条：168 pass / 0 fail / 1 skipped（删掉 7 个控制台/审批/接力测试文件，契约测试改判三屏的槽位与新标记）。

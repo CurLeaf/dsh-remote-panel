@@ -125,6 +125,27 @@ test('GET /pair 未部署时为 400', async () => {
 	}
 })
 
+test('监看控制台下线：手机批准 / 断点接力的路由全 404', async () => {
+	// 第三屏改成宿主右栏后，这四条路由没有调用方了。留着就是死接口，
+	// 所以一并删掉；这条测试防止将来「顺手又加回来」。
+	const removed = [
+		{ url: `${API_PREFIX}/pending` },
+		{ url: `${API_PREFIX}/relay` },
+		{ method: 'POST', url: `${API_PREFIX}/relay/mark`, body: { sessionId: 's', text: 't' } },
+		{ method: 'POST', url: `${API_PREFIX}/relay/unmark`, body: { id: 'x' } },
+		{ method: 'POST', url: `${API_PREFIX}/approve`, body: { id: 'x', decision: 'allowed-once' } },
+		{ method: 'POST', url: `${API_PREFIX}/watch`, body: { sessionId: 's', on: true } },
+	]
+	for (const entry of removed) {
+		const { status } = await call(entry)
+		assert.equal(status, 404, `${routeLabel(entry)} 应该 404`)
+	}
+})
+
+function routeLabel(entry) {
+	return `${entry.method ?? 'GET'} ${entry.url.slice(API_PREFIX.length)}`
+}
+
 test('detectTls：按线上 Caddyfile 判断，重新部署时向导不会把 TLS 改回明文', async () => {
 	const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import('node:fs')
 	const { tmpdir } = await import('node:os')

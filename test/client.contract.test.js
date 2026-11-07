@@ -72,26 +72,33 @@ test('apply 注册设置分区与移动端外壳插槽', () => {
 	const byName = new Map(registrations.map((entry) => [entry.registration.name, entry]))
 	assert.deepEqual([...byName.keys()].sort(), [
 		'conversation.header.leading',
-		'main',
 		'settings.section',
 		'shell.overlay',
-		'sidebar.panellist',
 	])
+	assert.deepEqual(
+		registrations.map((entry) => entry.registration.id).sort(),
+		['remote-panel', 'remote-panel.hamburger', 'remote-panel.new-chat', 'remote-panel.panels'],
+	)
 
 	const section = byName.get('settings.section')
 	assert.equal(section.registration.id, 'remote-panel')
 	assert.equal(section.registration.label(), '远程访问')
 	assert.equal(typeof section.component, 'function')
 
-	assert.equal(byName.get('shell.overlay').registration.id, 'remote-panel.new-chat')
 	assert.equal(byName.get('conversation.header.leading').registration.id, 'remote-panel.hamburger')
 
-	// 监看面板：main 的 key 必须和侧栏入口的 id 一致，否则点了没反应
-	const main = byName.get('main')
-	assert.equal(main.registration.key, 'pocket-console')
-	const panellist = byName.get('sidebar.panellist')
-	assert.equal(panellist.registration.id, 'pocket-console')
-	assert.equal(panellist.registration.label(), '监看')
+	// 监看面板整体下线：main 槽位（key=pocket-console）和侧栏入口都不该再注册
+	assert.equal(registrations.some((entry) => entry.registration.name === 'main'), false, '监看面板不许再占 main 槽位')
+	assert.equal(
+		registrations.some((entry) => entry.registration.name === 'sidebar.panellist'),
+		false,
+		'侧栏「监看」入口必须删掉',
+	)
+
+	// 第三屏的落地页挂在 shell.overlay 上：不占 main、不顶掉对话正文
+	const panels = registrations.find((entry) => entry.registration.id === 'remote-panel.panels')
+	assert.equal(panels.registration.name, 'shell.overlay')
+	assert.equal(typeof panels.component, 'function')
 })
 
 test('每个面板组件浅渲染都不抛错', () => {
@@ -123,63 +130,6 @@ test('每个面板组件浅渲染都不抛错', () => {
 		assert.doesNotThrow(() => component(props[name] ?? {}), `${name} 渲染抛错`)
 	}
 	assert.equal(typeof components[0], 'function')
-})
-
-test('监看面板卸载时按 { dispose } 形状收尾（整页黑屏回归）', async () => {
-	// 现场：mountConsole 返回 { store, dispose }，旧代码把它当函数调用 →
-	// TypeError: dispose is not a function → 宿主判 root 槽位崩溃 → 返回对话后整页黑屏。
-	const entry = loadBundle()
-	const effects = []
-	let disposedTimes = 0
-	const react = {
-		useCallback: (fn) => fn,
-		useEffect: (fn) => effects.push(fn),
-		useRef: (value) => ({ current: value ?? {} }),
-		useState: (value) => [typeof value === 'function' ? value() : value, () => {}],
-	}
-	const req = (id) => {
-		if (id === 'react') return react
-		if (id === 'react/jsx-runtime') return { jsx: () => null, jsxs: () => null }
-		throw new Error(`unexpected require: ${id}`)
-	}
-	req.async = () => Promise.resolve({ mountConsole: () => ({ store: {}, dispose: () => { disposedTimes++ } }) })
-
-	const exports = entry.factory(req)
-	const Host = exports.components.ConsolePanelHost
-	assert.equal(typeof Host, 'function')
-
-	Host({ onExit: () => {}, sessions: {} })
-	assert.equal(effects.length, 1, 'Host 必须挂一个 effect 才能在卸载时收尾')
-
-	const cleanup = effects[0]()
-	await new Promise((r) => setTimeout(r, 0))
-	assert.doesNotThrow(() => cleanup(), 'cleanup 不能抛（抛了宿主会把整个 root 卸掉）')
-	assert.equal(disposedTimes, 1, 'dispose 必须恰好调用一次')
-})
-
-test('监看面板也接受「mountConsole 直接返回函数」的形状', async () => {
-	const entry = loadBundle()
-	const effects = []
-	let disposedTimes = 0
-	const react = {
-		useCallback: (fn) => fn,
-		useEffect: (fn) => effects.push(fn),
-		useRef: (value) => ({ current: value ?? {} }),
-		useState: (value) => [typeof value === 'function' ? value() : value, () => {}],
-	}
-	const req = (id) => {
-		if (id === 'react') return react
-		if (id === 'react/jsx-runtime') return { jsx: () => null, jsxs: () => null }
-		throw new Error(`unexpected require: ${id}`)
-	}
-	req.async = () => Promise.resolve({ mountConsole: () => () => { disposedTimes++ } })
-
-	const exports = entry.factory(req)
-	exports.components.ConsolePanelHost({ onExit: () => {}, sessions: {} })
-	const cleanup = effects[0]()
-	await new Promise((r) => setTimeout(r, 0))
-	assert.doesNotThrow(() => cleanup())
-	assert.equal(disposedTimes, 1)
 })
 
 // ---------------------------------------------------------------------------
@@ -392,14 +342,28 @@ test('输入条浮在正文上方：不再走「fixed 座位 + 正文让位」�
 
 // ---------------------------------------------------------------- 三屏翻页
 
-test('翻页引擎带三页，非对话页是懒挂载的一整层', () => {
+test('翻页引擎带三页，第三页是面板落地页', () => {
 	const exports = loadBundle().factory(fakeRequire)
 	assert.equal(exports.pager.pages, 3, '轨道必须是三页')
-	assert.equal(typeof exports.components.PagerSheet, 'function', '非对话页要作为一个组件暴露出来')
+	assert.equal(typeof exports.components.PagerPanels, 'function', '面板落地页要作为一个组件暴露出来')
+	assert.equal(exports.components.PagerSheet, undefined, '旧的监看整屏页必须删掉')
 	const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
 	assert.equal(source.includes('installDrawerSwipe'), false, '旧的跟手抽屉实现必须整体删掉，不能两套手势并存')
-	assert.ok(source.includes("className: 'dsh-page-console'"), '非对话页要有自己的整屏层')
+	assert.ok(source.includes("className: 'dsh-page-panels'"), '面板落地页要有自己的整屏层')
 	assert.ok(source.includes("'dsh-pager-seam'"), '页与页之间要有接缝')
+})
+
+test('第三屏就是宿主右栏：翻页平移整列，面板开合自动翻页', () => {
+	const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+	// 第三页不能再自绘一个「监看」，必须是宿主的右栏轨道
+	assert.ok(source.includes("querySelector('[data-rightbar-col]')"), '第三屏要认宿主的右栏容器')
+	assert.ok(source.includes("setAttribute('data-rp-page', 'panels')"), '右栏要打上 panels 标')
+	assert.ok(source.includes('data-sidebar-right-open'), '面板开合要认宿主的语义属性')
+	assert.ok(source.includes("dispatchEvent(new Event('dsh-pager:panels'))"), '翻到第三页前要预挂落地页')
+	// 面板入口不再靠拦截点击
+	assert.equal(source.includes('pocket-console'), false, '监看面板的 id 不该再出现')
+	assert.equal(source.includes('dsh-page-console'), false, '旧的监看整屏层不该再出现')
+	assert.equal(source.includes('approvalsApi'), false, '手机审批桥已删除')
 })
 
 test('apply 只挂一条翻页 effect（旧抽屉那条必须消失）', () => {

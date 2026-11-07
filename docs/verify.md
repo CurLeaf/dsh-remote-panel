@@ -106,16 +106,15 @@ systemctl status easytier-dsh-remote --no-pager | head -5
 |---|---|---|---|
 | | | | |
 
-### 监看（执行处置台）
+### 第三屏：面板（桌面右栏）
 
 | # | 场景 | 期望 | 看什么 |
 | --- | --- | --- | --- |
-| J1 | 抽屉 → 监看 → 会话页 | 一句「N 个在跑 · 共 M 个」，卡住/运行中分色，点一行切过去 | `.row-sub` 文案、`data-act="session"` |
-| J2 | 步骤展开 | `耗时 X` + 进度条 + `调用链（N）`，每行 `时间 · 名字 · 摘要 · 耗时` | `renderCallChain` 输出、`.bar > div` |
-| J3 | 运行中 >3 分钟 | 步骤头出现「卡住 X 分钟」，进度条转红 | `s.stale` |
-| J4 | 短语 chips | 点「继续」→ toast `已发送：继续`，会话里出现这条消息 | `session.prompt` 是否真的发出 |
-| J5 | 接管 | 点「接管」→ agent 当轮被取消；再点「释放」 | `session.cancel()` |
-| J6 | 手机批准（开） | 桌面触发审批 → 手机出现「等你批准」→ 批准后桌面继续 | `/remote-panel/api/pending`、`/approve` |
-| J7 | 标记待处理 | toast `已标记，桌面能看到`；桌面设置里出现该条 | `/relay/mark`、设置 → 手机断点 |
-| J8 | 后台待批 | 手机收到系统通知 | APK：原生通知；浏览器：PWA `Notification` |
-| J9 | 一键验收 | `npm run verify:live` 13 项全 PASS | 脚本输出 |
+| P1 | 左滑到第三页（没开面板） | 落地页列出面板入口：工作区文件 / 终端 / Git / 设备预览 / 浏览器 | `.dsh-panels-row` 数量与标题 |
+| P2 | 点一个入口 | 面板整屏开在第三页（`x=0`、宽=视口），落地页让位 | `[data-sidebar-right-open]`、`html.dsh-panels-open` |
+| P3 | 收起面板 | 回到**打开它的那一页**：从落地页开的回落地页，从对话开的回对话 | `documentElement.dataset.dshPage` |
+| P4 | 对话里点「打开右侧边栏」 | 自动滑到第三页，面板已铺满 | 同上 + 面板 `getBoundingClientRect().x` |
+| P5 | 面板开着时右滑回对话 | 面板移出轨道但状态还在，再左滑原样回来 | 面板 `x` 在 390 / 0 之间 |
+| P6 | 旧监看已下线 | 侧栏没有「监看」入口，`.pc-host` / `.dsh-page-console` 为 0 | DOM 查询 |
+| P7 | 旧路由已下线 | `/remote-panel/api/pending`、`/relay`、`/watch` 全 404 | `curl -H 'x-dsh-remote-panel: …'` |
+| P8 | 一键验收 | `npm run verify:live` 全 PASS | 脚本输出 |
