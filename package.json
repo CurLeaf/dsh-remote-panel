@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-panel",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "DSH 远程访问控制面 + 手机三屏外壳：部署、配对、状态，手机第三屏直接就是桌面右栏面板。",
   "type": "module",
   "main": "./lib/index.js",

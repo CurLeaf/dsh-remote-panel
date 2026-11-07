@@ -427,6 +427,19 @@ test('落点：慢慢拖过一半才翻，轻甩一下就翻', () => {
 	assert.equal(settle(2 * size, 9000, size, pages, 2), 2)
 })
 
+test('桌面端不许给右栏写翻页位移（全屏面板被推出屏幕 = 灰屏）', () => {
+	const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+	const start = source.indexOf('const placePanels = ()')
+	assert.notEqual(start, -1, 'placePanels 是右栏位移的唯一出口，改名字要同步改这个测试')
+	const body = source.slice(start, start + 1100)
+	assert.ok(body.includes('if (drag !== null) return'), '拖动中由 paint 负责，placePanels 别插一脚')
+	assert.match(
+		body,
+		/if \(!narrow\.matches\) \{[\s\S]*?panels\.style\.transform = ''/,
+		'桌面端（>1023）必须清掉列位移：否则全屏面板会被整体推到屏幕外，只剩灰底',
+	)
+})
+
 // ---------------------------------------------------------------- 外壳语义钩子
 
 test('外壳优先用语义钩子认，不靠哈希类名', () => {
