@@ -1,0 +1,1 @@
+{"versionCode":15,"versionName":"0.3.5","apk":"/app.apk","size":75186,"sha256":"5c2f03708804077d68586dc4704968d16a653e20cddea8dcccc1819595167642","notes":"修复：证书校验收紧为系统 CA；新增：启动自动检查更新"}

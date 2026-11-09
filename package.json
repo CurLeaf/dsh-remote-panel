@@ -1,7 +1,7 @@
 {
   "name": "dsh-remote-panel",
-  "version": "1.2.1",
-  "description": "DSH 远程访问控制面 + 手机三屏外壳：部署、配对、状态，手机第三屏直接就是桌面右栏面板。",
+  "version": "2.0.0",
+  "description": "DSH 远程访问控制面 + 手机三屏外壳：公网隧道部署、配对、状态，手机第三屏直接就是桌面右栏面板。",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
@@ -36,7 +36,6 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "e2e": "node test/e2e/shell.mjs",
-    "verify:live": "node tools/verify-live.mjs",
     "tunnel:install": "node lib/deploy/tunnel-cli.mjs install",
     "tunnel:status": "node lib/deploy/tunnel-cli.mjs status",
     "tunnel:verify": "node test/tunnel/e2e.mjs",
@@ -61,8 +60,7 @@
     "deepseek-harness",
     "plugin",
     "remote",
-    "easytier",
-    "caddy",
+    "tunnel",
     "mobile"
   ],
   "publishConfig": {

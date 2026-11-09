@@ -16,8 +16,12 @@ cat > "$UNIT" <<'UNIT_EOF'
 UNIT_EOF
 chmod 644 "$UNIT"
 
-# 只在首次安装时生成设备令牌文件目录；令牌由 agent 自己写入（600）
+# 面板的唯一状态来源：agent.json 写不出/写坏了，面板就会显示「未部署」
+cat > "$STATE_DIR/agent.json" <<'CONFIG_EOF'
+@@AGENT_CONFIG@@
+CONFIG_EOF
 chmod 700 "$STATE_DIR" || true
+chmod 600 "$STATE_DIR/agent.json"
 
 systemctl --user daemon-reload
 systemctl --user enable --now @@UNIT_NAME@@

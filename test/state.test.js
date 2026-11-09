@@ -1,79 +1,64 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { applyBackfill, parseBackfill, readState, statePath } from '../lib/state.js'
+import { publicState, readAgentConfig, readState } from '../lib/state.js'
 
-function encode(payload) {
-	return `DSH_REMOTE_OK ${Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')}`
+function homeWith(config) {
+	const home = mkdtempSync(join(tmpdir(), 'dsh-panel-state-'))
+	mkdirSync(join(home, '.config', 'dsh-tunnel'), { recursive: true })
+	writeFileSync(join(home, '.config', 'dsh-tunnel', 'agent.json'), JSON.stringify(config))
+	return home
 }
 
-test('解析带前缀的回填码', () => {
-	const parsed = parseBackfill(encode({ version: '0.1.0', port: 8710, ip: '10.140.140.223', upstream: 3080 }))
-	assert.equal(parsed.port, 8710)
-	assert.equal(parsed.ip, '10.140.140.223')
-	assert.equal(parsed.upstream, 3080)
+const CONFIG = {
+	relayUrl: 'wss://relay.example.test/agent',
+	hostname: 'home.example.test',
+	gateKey: 'K7mQ2vT9pLxR4nW8sZbY3cHd',
+	targetPort: 3080,
+	consoleUrl: 'https://admin.example.test/',
+	nodeBin: '/usr/bin/node',
+}
+
+test('没有 agent.json 就是未部署', () => {
+	const home = mkdtempSync(join(tmpdir(), 'dsh-panel-empty-'))
+	assert.equal(readAgentConfig(home), null)
+	assert.equal(readState(home), null)
 })
 
-test('解析不带前缀的裸 base64', () => {
-	const code = encode({ port: 8710, ip: '10.0.0.1' }).replace('DSH_REMOTE_OK ', '')
-	assert.equal(parseBackfill(code).port, 8710)
+test('损坏的 JSON 按未部署处理，不抛异常', () => {
+	const home = mkdtempSync(join(tmpdir(), 'dsh-panel-broken-'))
+	mkdirSync(join(home, '.config', 'dsh-tunnel'), { recursive: true })
+	writeFileSync(join(home, '.config', 'dsh-tunnel', 'agent.json'), '{not json')
+	assert.equal(readAgentConfig(home), null)
+	assert.equal(readState(home), null)
 })
 
-test('空回填码被拒', () => {
-	assert.throws(() => parseBackfill('   '), /为空/)
+test('readState 从 agent.json 映射出面板状态', () => {
+	const home = homeWith(CONFIG)
+	const state = readState(home)
+	assert.equal(state.provider, 'dsh-tunnel')
+	assert.equal(state.hostname, 'home.example.test')
+	assert.equal(state.port, 443)
+	assert.equal(state.accessKey, CONFIG.gateKey)
+	assert.equal(state.upstream, 3080)
+	assert.equal(state.relayUrl, CONFIG.relayUrl)
+	assert.equal(typeof state.deployedAt, 'number')
 })
 
-test('端口非法被拒', () => {
-	assert.throws(() => parseBackfill(encode({ port: 70000, ip: '10.0.0.1' })), /端口非法/)
-})
-
-test('IP 非法被拒', () => {
-	assert.throws(() => parseBackfill(encode({ port: 8710, ip: '10.0.0.999' })), /虚拟 IP 非法/)
-})
-
-test('被截断的回填码被拒', () => {
-	const truncated = encode({ port: 8710, ip: '10.0.0.1' }).slice(0, 20)
-	assert.throws(() => parseBackfill(truncated), /JSON|base64/)
-})
-
-test('applyBackfill 落盘且权限 0600', () => {
-	const home = mkdtempSync(join(tmpdir(), 'panel-state-'))
-	try {
-		const { state, path } = applyBackfill(encode({ port: 8710, ip: '10.0.0.1' }), { version: '0.1.0', home })
-		assert.equal(path, statePath(home))
-		assert.equal(state.port, 8710)
-		assert.equal(statSync(path).mode & 0o777, 0o600)
-
-		const loaded = readState(home)
-		assert.equal(loaded.ip, '10.0.0.1')
-		assert.equal(loaded.schema, 1)
-		assert.equal(loaded.panelVersion, '0.1.0')
-	} finally {
-		rmSync(home, { recursive: true, force: true })
+test('缺 hostname / gateKey / relayUrl 都算未部署', () => {
+	for (const key of ['hostname', 'gateKey', 'relayUrl']) {
+		const home = homeWith({ ...CONFIG, [key]: '' })
+		assert.equal(readAgentConfig(home), null, `${key} 为空时应返回 null`)
 	}
 })
 
-test('状态文件损坏时返回 null', () => {
-	const home = mkdtempSync(join(tmpdir(), 'panel-state-'))
-	try {
-		writeFileSync(join(home, 'remote-panel.json'), '{broken')
-		assert.equal(readState(home), null)
-	} finally {
-		rmSync(home, { recursive: true, force: true })
-	}
-})
-
-test('落盘文件是合法 JSON 且不含 BOM', () => {
-	const home = mkdtempSync(join(tmpdir(), 'panel-state-'))
-	try {
-		applyBackfill(encode({ port: 8710, ip: '10.0.0.1' }), { version: '0.1.0', home })
-		const raw = readFileSync(join(home, 'remote-panel.json'), 'utf8')
-		assert.doesNotThrow(() => JSON.parse(raw))
-		assert.ok(!raw.startsWith('\uFEFF'))
-	} finally {
-		rmSync(home, { recursive: true, force: true })
-	}
+test('publicState 不丢业务字段，但绝不带门禁口令', () => {
+	const state = readState(homeWith(CONFIG))
+	const pub = publicState(state)
+	assert.equal(pub.hostname, 'home.example.test')
+	assert.equal(pub.upstream, 3080)
+	assert.equal('accessKey' in pub, false)
 })

@@ -119,10 +119,13 @@ test('每个面板组件浅渲染都不抛错', () => {
 	// 逐个渲染，防止再次出现「某个分支引用了未声明的变量」这类只在渲染期暴露的问题
 	const props = {
 		Panel: {},
-		DeployWizard: { onDeployed: () => {} },
-		StatusCard: { state: { ip: '10.0.0.1', port: 8710 }, version: '0.1.0', onRedeploy: () => {} },
-		PairCard: {},
-		AccessCard: {},
+		DeployCard: { onDeployed: () => {} },
+		StatusCard: {
+			state: { hostname: 'home.example.test', port: 443, upstream: 3080 },
+			version: '1.2.1',
+			onRedeploy: () => {},
+		},
+		PairCard: { state: { hostname: 'home.example.test', port: 443 } },
 		StaleBanner: {},
 		AppCard: {},
 	}
